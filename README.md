@@ -1,4 +1,4 @@
-# IntelliStar i1 Config Generator
+# IntelliStar Config Generator
 
 Generates SCMT configuration files for the domestic IntelliStar system for anywhere in the U.S., Canada, or Mexico.
 
