@@ -1,23 +1,18 @@
 """
 Weather Location Configuration Generator
 
-Searches for locations, finds nearby cities using BFS traversal,
+Searches for locations, prompts for nearby cities,
 and queries local database records.
 """
 
 from __future__ import annotations
 
-import asyncio
-import math
 import sqlite3
-from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Iterator
 
-import aiohttp
 import requests
 
 API_KEY = "e1f10a1e78da46f5b10a1e78da96f525"
@@ -25,58 +20,11 @@ DB_PATH = Path("./LFRecord.db")
 
 BASE_URL = "https://api.weather.com/v3"
 LOCATION_SEARCH_ENDPOINT = f"{BASE_URL}/location/search"
-NEARBY_ENDPOINT = f"{BASE_URL}/location/near"
 
-EXCLUDED_STATION_KEYWORDS = frozenset([
-    "Rcs", "East", "PFRA", "CS", "AWS", "Marine", "CDA", "West", "(Autob)"
-])
-
-
-class DistanceUnit(Enum):
-    """Supported distance units for calculations."""
-    KILOMETERS = "m"
-    MILES = "e"
-    MILES_ALT = "h"
-    METERS = "s"
-
-
-@dataclass
-class SearchConfig:
-    """Configuration for nearby city search."""
-    max_distance: float = 500.0
-    max_results: int = 8
-    min_spacing: float = 2.0
-
-
-@dataclass(frozen=True)
-class Coordinates:
-    """Immutable geographic coordinates."""
-    latitude: float
-    longitude: float
-
-    @property
-    def as_tuple(self) -> tuple[float, float]:
-        return (self.latitude, self.longitude)
-
-
-@dataclass
-class City:
-    """Represents a city/location with geographic data."""
-    name: str
-    state_province: str
-    country: str
-    coords: Coordinates
-    distance_to_origin: float = 0.0
-
-    def to_dict(self) -> dict:
-        return {
-            "name": self.name,
-            "stateProvince": self.state_province,
-            "country": self.country,
-            "lat": self.coords.latitude,
-            "lon": self.coords.longitude,
-            "distToOrigin": self.distance_to_origin
-        }
+print("=" * 60)
+print("IntelliStar Configuration Generator")
+print("Created by @sspwxr (raii), version 1-2025-12-19")
+print("=" * 60)
 
 @contextmanager
 def get_db_connection(db_path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
@@ -113,6 +61,26 @@ def get_record_by_location_id(location_id: str) -> dict | None:
     print(f"Found record: {record}")
     return record
 
+
+def search_records_by_name(search_term: str) -> list[dict]:
+    """
+    Search LFRecord.db for records matching a name.
+
+    Args:
+        search_term: The name to search for (uses LIKE matching).
+
+    Returns:
+        List of matching records as dictionaries.
+    """
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "SELECT * FROM LFRecord WHERE prsntNm LIKE ? ORDER BY prsntNm LIMIT 20",
+            (f"%{search_term}%",)
+        )
+        rows = cursor.fetchall()
+
+    return [dict(row) for row in rows]
+
 class WeatherAPIClient:
     """Client for Weather.com API interactions."""
 
@@ -140,288 +108,81 @@ class WeatherAPIClient:
         response.raise_for_status()
         return response.json()
 
-    async def fetch_nearby_locations(
-        self,
-        session: aiohttp.ClientSession,
-        coords: Coordinates
-    ) -> dict:
-        """
-        Fetch nearby observation stations for given coordinates.
 
-        Args:
-            session: Active aiohttp session.
-            coords: Geographic coordinates to search around.
-
-        Returns:
-            JSON response with nearby location data.
-        """
-        url = (
-            f"{NEARBY_ENDPOINT}"
-            f"?geocode={coords.latitude},{coords.longitude}"
-            "&product=observation"
-            "&format=json"
-            f"&apiKey={self.api_key}"
-        )
-        async with session.get(url) as response:
-            return await response.json()
-
-def vincenty_distance(
-    point1: Coordinates,
-    point2: Coordinates,
-    unit: DistanceUnit = DistanceUnit.MILES
-) -> float:
+def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
     """
-    Calculate geodesic distance using Vincenty's inverse formula (WGS-84).
+    Prompt user for nearby location names, searching LFRecord database directly.
 
     Args:
-        point1: First geographic point.
-        point2: Second geographic point.
-        unit: Desired output unit.
+        max_nearby: Maximum number of nearby locations to prompt for.
 
     Returns:
-        Distance between points in specified unit.
-
-    Raises:
-        RuntimeError: If formula fails to converge.
+        List of matching database records as dictionaries.
     """
-    SEMI_MAJOR_AXIS = 6378137.0
-    FLATTENING = 1 / 298.257223563
-    SEMI_MINOR_AXIS = (1 - FLATTENING) * SEMI_MAJOR_AXIS
-
-    φ1 = math.radians(point1.latitude)
-    φ2 = math.radians(point2.latitude)
-    L = math.radians(point2.longitude - point1.longitude)
-
-    U1 = math.atan((1 - FLATTENING) * math.tan(φ1))
-    U2 = math.atan((1 - FLATTENING) * math.tan(φ2))
-
-    sin_U1, cos_U1 = math.sin(U1), math.cos(U1)
-    sin_U2, cos_U2 = math.sin(U2), math.cos(U2)
-
-    λ = L
-    max_iterations = 100
-
-    for _ in range(max_iterations):
-        sin_λ = math.sin(λ)
-        cos_λ = math.cos(λ)
-
-        sin_σ = math.sqrt(
-            (cos_U2 * sin_λ) ** 2 +
-            (cos_U1 * sin_U2 - sin_U1 * cos_U2 * cos_λ) ** 2
-        )
-
-        if sin_σ == 0:
-            return 0.0
-
-        cos_σ = sin_U1 * sin_U2 + cos_U1 * cos_U2 * cos_λ
-        σ = math.atan2(sin_σ, cos_σ)
-
-        sin_α = (cos_U1 * cos_U2 * sin_λ) / sin_σ
-        cos2_α = 1 - sin_α ** 2
-
-        if cos2_α == 0:
-            cos_2σm = 0
-        else:
-            cos_2σm = cos_σ - (2 * sin_U1 * sin_U2) / cos2_α
-
-        C = (FLATTENING / 16) * cos2_α * (4 + FLATTENING * (4 - 3 * cos2_α))
-
-        λ_prev = λ
-        λ = L + (1 - C) * FLATTENING * sin_α * (
-            σ + C * sin_σ * (
-                cos_2σm + C * cos_σ * (-1 + 2 * cos_2σm ** 2)
-            )
-        )
-
-        if abs(λ - λ_prev) <= 1e-12:
-            break
-    else:
-        raise RuntimeError("Vincenty's formula failed to converge")
-
-    u2 = cos2_α * (SEMI_MAJOR_AXIS ** 2 - SEMI_MINOR_AXIS ** 2) / (SEMI_MINOR_AXIS ** 2)
-    A = 1 + (u2 / 16384) * (4096 + u2 * (-768 + u2 * (320 - 175 * u2)))
-    B = (u2 / 1024) * (256 + u2 * (-128 + u2 * (74 - 47 * u2)))
-
-    Δσ = B * sin_σ * (
-        cos_2σm + (B / 4) * (
-            cos_σ * (-1 + 2 * cos_2σm ** 2) -
-            (B / 6) * cos_2σm * (-3 + 4 * sin_σ ** 2) * (-3 + 4 * cos_2σm ** 2)
-        )
-    )
-
-    distance_meters = SEMI_MINOR_AXIS * A * (σ - Δσ)
-
-    conversions = {
-        DistanceUnit.KILOMETERS: distance_meters / 1000,
-        DistanceUnit.MILES: distance_meters / 1609.344,
-        DistanceUnit.MILES_ALT: distance_meters / 1609.344,
-        DistanceUnit.METERS: distance_meters,
-    }
-    return conversions.get(unit, distance_meters)
-
-@dataclass
-class NearbyCityFinder:
-    """BFS-based finder for nearby cities within distance constraints."""
-
-    origin: Coordinates
-    origin_name: str
-    config: SearchConfig = field(default_factory=SearchConfig)
-    api_client: WeatherAPIClient = field(default_factory=WeatherAPIClient)
-
-    async def find(self) -> list[City]:
-        """
-        Find nearby cities using breadth-first search.
-        Continues searching aggressively until max_results is reached.
-
-        Returns:
-            List of nearby cities sorted by distance.
-        """
-        nearby_cities: list[City] = []
-        visited_coords: set[tuple[float, float]] = set()
-        queue: deque[Coordinates] = deque([self.origin])
-        search_attempts = 0
-        max_attempts = 50
-
-        async with aiohttp.ClientSession() as session:
-            while queue and len(nearby_cities) < self.config.max_results and search_attempts < max_attempts:
-                search_attempts += 1
-                current = queue.popleft()
-                cities_from_location = await self._process_location(
-                    session, current, nearby_cities, visited_coords
-                )
-
-                for city in cities_from_location:
-                    if len(nearby_cities) < self.config.max_results:
-                        nearby_cities.append(city)
-                        queue.append(city.coords)
-                    else:
-                        break
-
-                if len(queue) < 3 and len(nearby_cities) < self.config.max_results:
-                    for city in nearby_cities[-min(3, len(nearby_cities)):]:
-                        queue.append(city.coords)
-
-        return sorted(nearby_cities, key=lambda c: c.distance_to_origin)
-
-    async def _process_location(
-        self,
-        session: aiohttp.ClientSession,
-        coords: Coordinates,
-        existing_cities: list[City],
-        visited: set[tuple[float, float]]
-    ) -> list[City]:
-        """Process a location and extract valid nearby cities."""
-        data = await self.api_client.fetch_nearby_locations(session, coords)
-        locations = data.get("location", {})
-
-        candidates: list[City] = []
-        names = locations.get("stationName", [])
-
-        for i, name in enumerate(names):
-            city = self._extract_city(locations, i, name)
-            if city and self._is_valid_city(city, existing_cities, visited):
-                visited.add(city.coords.as_tuple)
-                candidates.append(city)
-
-        return candidates
-
-    def _extract_city(
-        self,
-        locations: dict,
-        index: int,
-        name: str
-    ) -> City | None:
-        """Extract city data from API response at given index."""
-        if name == self.origin_name:
-            return None
-
-        if any(kw in name for kw in EXCLUDED_STATION_KEYWORDS):
-            return None
-
-        try:
-            coords = Coordinates(
-                latitude=locations["latitude"][index],
-                longitude=locations["longitude"][index]
-            )
-            distance = round(vincenty_distance(coords, self.origin))
-
-            return City(
-                name=name,
-                state_province=locations.get("adminDistrictCode", [""])[index] or "",
-                country=locations.get("countryCode", [""])[index],
-                coords=coords,
-                distance_to_origin=distance
-            )
-        except (IndexError, KeyError):
-            return None
-
-    def _is_valid_city(
-        self,
-        city: City,
-        existing: list[City],
-        visited: set[tuple[float, float]]
-    ) -> bool:
-        """Check if city meets all validity criteria."""
-        if city.coords.as_tuple in visited:
-            return False
-
-        max_dist = self.config.max_distance
-        if len(existing) < self.config.max_results // 2:
-            max_dist *= 2
+    nearby_locations = []
+    
+    print(f"\nEnter up to {max_nearby} nearby locations (press Enter to skip, 'back' to go back):")
+    
+    i = 0
+    while i < max_nearby:
+        location_name = input(f"  Nearby location {i + 1}: ").strip()
         
-        if city.distance_to_origin > max_dist:
-            return False
-
-        if existing:
-            min_spacing = self.config.min_spacing
-            if len(existing) >= self.config.max_results * 0.75:
-                min_spacing = min_spacing / 2
+        if not location_name:
+            print(f"    Skipped")
+            i += 1
+            continue
+        
+        if location_name.lower() == 'back':
+            if nearby_locations:
+                removed = nearby_locations.pop()
+                i -= 1
+                print(f"    Removed: {removed.get('prsntNm', 'Unknown')}")
+            else:
+                print(f"    Nothing to go back to")
+            continue
+        
+        # Search the database directly
+        matches = search_records_by_name(location_name)
+        
+        if not matches:
+            print(f"    No results found for '{location_name}' in database")
+            continue
+        
+        if len(matches) == 1:
+            # Single match - use it directly
+            record = matches[0]
+            nearby_locations.append(record)
+            print(f"    Found: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {record.get('locId', '')[:8]})")
+            i += 1
+        else:
+            # Multiple matches - ask user to select
+            print(f"    Multiple matches found ({len(matches)}):")
+            for idx, record in enumerate(matches, 1):
+                loc_id = record.get('locId', '')[:8] if record.get('locId') else ''
+                print(f"      [{idx}] {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {loc_id})")
+            
+            while True:
+                selection = input(f"    Select (1-{len(matches)}, or 'skip'): ").strip()
                 
-            for existing_city in existing:
-                spacing = vincenty_distance(city.coords, existing_city.coords)
-                if spacing < min_spacing:
-                    return False
+                if selection.lower() == 'skip':
+                    print(f"    Skipped")
+                    break
+                
+                try:
+                    sel_idx = int(selection) - 1
+                    if 0 <= sel_idx < len(matches):
+                        record = matches[sel_idx]
+                        nearby_locations.append(record)
+                        print(f"    Selected: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')}")
+                        i += 1
+                        break
+                    else:
+                        print(f"    Invalid selection. Enter 1-{len(matches)}")
+                except ValueError:
+                    print(f"    Invalid input. Enter a number or 'skip'")
+    
+    return nearby_locations
 
-        return True
-
-
-async def get_nearby_cities(
-    location_data: dict,
-    max_distance: float = 500,
-    max_results: int = 8,
-    min_spacing: float = 2,
-) -> list[dict]:
-    """
-    Find nearby cities for a given location.
-
-    Args:
-        location_data: Location data from search API.
-        max_distance: Maximum distance from origin in miles.
-        max_results: Maximum number of cities to return.
-        min_spacing: Minimum distance between cities in miles.
-
-    Returns:
-        List of nearby city dictionaries.
-    """
-    loc = location_data["location"]
-    origin = Coordinates(
-        latitude=loc["latitude"][0],
-        longitude=loc["longitude"][0]
-    )
-    origin_name = loc["city"][0]
-
-    finder = NearbyCityFinder(
-        origin=origin,
-        origin_name=origin_name,
-        config=SearchConfig(
-            max_distance=max_distance,
-            max_results=max_results,
-            min_spacing=min_spacing
-        )
-    )
-
-    cities = await finder.find()
-    return [city.to_dict() for city in cities]
 
 def prompt_for_location() -> dict:
     """Prompt user for location and return search results."""
@@ -442,14 +203,14 @@ def prompt_for_location() -> dict:
             print(f"Raw location data: {loc}")
             raise ValueError(f"No location data for '{location_name}'")
         
-        print(f"✓ Found: {loc.get('city', [''])[0]}, {loc.get('adminDistrictCode', [''])[0]} {loc.get('countryCode', [''])[0]}")
+        print(f"Found: {loc.get('city', [''])[0]}, {loc.get('adminDistrictCode', [''])[0]} {loc.get('countryCode', [''])[0]}")
         print(f"  Location ID: {loc.get('locId', [''])[0][:8]}")
         print(f"  Coordinates: {loc.get('latitude', [0])[0]}, {loc.get('longitude', [0])[0]}")
         
         return result
         
     except Exception as e:
-        print(f"\n❌ ERROR searching for location '{location_name}':")
+        print(f"\nERROR searching for location '{location_name}':")
         print(f"   {str(e)}")
         print(f"\nTip: Try being more specific (e.g., 'Dildo, NL' or 'Dildo, Newfoundland')")
         raise
@@ -742,15 +503,31 @@ dsm.set('Config.1.Tag.General.airportData', d, 0, 1)"""
     return output
 
 def compile_full_config(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
-    """Compile all configuration sections into a complete file."""
     from datetime import datetime
+
+    secret_hehe = "#"
     
     sections = []
     
     start_time = datetime.now().strftime("%a %b %d %H:%M:%S %Z %Y")
+    if "Oct 10" in start_time:
+        import base64
+        secret_hehe = base64.b64decode("I+KghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghAoj4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCECiPioITioITioITioILioITioJDioITioITioITioJDioITioITioILioITioJDioITioITioITioITioITiooDio6Dio7bio7bio7/io7/io7/io7fio7bio7bio6Tio4DioYDioITioITioITioITioITioITioILioITioJDioITioITioILioITioJDioITioITioILioITioJDioITioKDioIQKI+KghOKghOKhgOKgoOKgkOKghOKghOKggeKghOKhgOKgkOKghOKgkOKgiOKghOKghOKghOKghOKjgOKjtOKjv+Kjv+Kjv+Kjv+Kjv+Kiv+Kjv+Kiv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjt+KjpuKhgOKghOKghOKghOKghOKggeKigOKgiOKghOKgiOKghOKhgOKggeKghOKhiOKghOKgoOKghOKghAoj4qCE4qCE4qCE4qGA4qCE4qGA4qCI4qCE4qGA4qCE4qGA4qCQ4qCE4qCE4qCE4qCE4qKA4qO04qO/4qO/4qG/4qO/4qK94qO+4qO94qK/4qO64qGv4qO34qO74qO94qO74qOf4qO/4qO/4qO/4qO/4qOm4qGA4qCE4qCE4qCE4qCE4qGA4qCQ4qCI4qCE4qCE4qCE4qCC4qCE4qCE4qCE4qCQ4qCECiPioITioITioIHioITioITiooDioITioIHioITioITiooDioITioITioITioITiooDio77io7/io7/ior/iob3ioa/io7/ior7io5/io7/io7Pior/iob3io77io7rio7Pio7vio7rio73io7viob/io7/io7/io6bioITioITioITioITioITioITioITioILioIHioITioJDioITioYDioITioIQKI+KghOKghOKgguKghOKggeKghOKghOKgkOKgiOKghOKghOKghOKghOKghOKghOKjv+Kjv+Kjv+Kjr+Kiv+KjveKju+KjveKjv+Kjv+Kjr+Kjv+Kjv+Kjv+Kjt+Kju+KiruKjl+Khr+KjnuKhvuKhueKhteKju+Kjv+Kjh+KghOKghOKghOKgguKghOKghOKgoOKgkOKghOKgguKghOKigOKghOKghAoj4qCE4qCE4qCC4qCI4qCE4qCI4qCE4qCE4qCC4qCE4qCB4qCE4qCE4qCE4qO44qO/4qO/4qO/4qO/4qG/4qG+4qOz4qK/4qK/4qK/4qC/4qC/4qCf4qCf4qCf4qC/4qOv4qG+4qOd4qOX4qOv4qKq4qKO4qKX4qOv4qO/4qOH4qCE4qCE4qCE4qCE4qKA4qCE4qKA4qCg4qCE4qCI4qCE4qCE4qGACiPioITioITioILioITioYjioITioKDioITioKDioJDioIjioITioITioITioIvioInioIHioJHioIHioonio4HioYHioIHioIHioITioITioITioITioITioITioITiooniorvior3io57ior7io5XiopXiop3ioo7io7/io7/ioYDioITioITioITioITiooDioITioITioYDioJDioIjioITioIQKI+KghOKghOKgguKggeKghOKghOKghOKghOKghOKghOKigOKghOKghOKghOKhp+KgoOKhgOKgkOKgguKjuOKjv+Kiv+KilOKilOKipOKiiOKgoeKhseKjqeKipOKitOKjnuKjvuKjveKivuKjveKjuuKhleKhleKhleKhveKjv+Kjv+Kgn+KituKghOKghOKghOKghOKghOKghOKgoOKghOKgguKghAoj4qCE4qCE4qCC4qCE4qCQ4qCE4qCg4qCE4qCE4qCC4qCE4qCE4qCE4qCE4qO/4qGz4qGE4qGi4qGC4qO/4qO/4qKv4qOr4qKX4qO94qOz4qGj4qOX4qKv4qOf4qO/4qO/4qK/4qG94qOz4qKX4qG34qO74qGO4qKO4qKO4qO/4qGH4qC74qOm4qCD4qCE4qCE4qCE4qGA4qCC4qCg4qCE4qCC4qCECiPioITioITioILioIjioITioJDioITioKDioITioITioILioITioITioITiob/ioZ3ioZzio5zio6zio7/io7/io7/io7fio6/iorrioLviobvio5ziopTioKHiopPiop3iopXioo/iopfioo/ioq/iobPioZ3iobjiobjio7jio6fioYDio7nio6DioITioITioITioYDioJDiooDioJDioIjioIQKI+KghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKjh+KiquKijuKhp+Khm+Kgm+Kgi+Kgi+KgieKgmeKjqOKjruKjpuKiheKhg+Kgh+KhleKhjOKhquKhqOKiuOKiqOKio+Kgq+KhqOKiquKiuOKgsOKjv+Kjh+KjvuKhnuKghOKghOKghOKghOKghOKghOKghOKghOKghAoj4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qKR4qGV4qG14qG74qOV4qCE4qCE4qCE4qCU4qGc4qGX4qGf4qOf4qK/4qKu4qKG4qGR4qKV4qOV4qKO4qKu4qGq4qGO4qGq4qGQ4qKF4qKH4qKj4qC54qGb4qO/4qGF4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCECiPioITioITioITioITioITioITioITioITioITioITioITioITioITioITiorjioo7ioKrioYrio4Tio7Dio7Dio7Xio5Xio67io6Lio7PiobjioajioKrioajioILioITioJHioo/ioJfioo3ioKrioaLioqPiooPioKrioYLio7nio73io7/io7fioYTioITioITioITioITioITioITioITioIQKI+KghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKhuOKgkOKgneKgi+Kgg+KgoeKhleKgrOKgjuKgrOKgqeKgseKimeKjmOKjkeKjgeKhiOKghOKghOKhleKijOKiiuKiquKguOKhmOKhnOKijOKgouKjuOKjvuKiv+Kjv+Kjv+KhgOKghOKghOKghOKghOKghOKghOKghAoj4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qGO4qOQ4qCy4qKS4qKa4qKb4qKb4qKb4qKb4qCb4qCd4qGL4qGr4qKJ4qCq4qGx4qCh4qCE4qCg4qKj4qKR4qCx4qGo4qGK4qGO4qKc4qKQ4qCF4qK84qG+4qOf4qO/4qO/4qO34qCR4qCQ4qKG4qGk4qOE4qCE4qCECiPioITiooLioJDioJDioYDioKHioITioIXioIjioITioIHioITioITio6DioYPioaLioKjiooDiooLiopDiopDiooTioJHioIziooziooLioKLioKHioZHioZjioozioKDioZjioYzioo7ioJzioYzioo7ioJzioYzioKLioKjiobjio7/iob3io7/io7/io7/io6PioITioqrioqrio7rioYTioIQKI+KghOKgguKghOKhgeKghOKgguKhgeKgiOKhgOKgguKjgeKitOKgi+KggeKhouKhkeKhqOKikOKikOKijOKgouKjguKio+KgqeKhguKhouKhkeKhkeKhjOKinOKgsOKhqOKiquKimOKglOKhseKimOKglOKhkeKgqOKiiOKgkOKivOKht+Kjv+Kju+Kit+Kir+KiguKgo+KhmOKglOKhouKiv+KhgAoj4qCE4qCF4qCC4qGA4qCC4qKB4qCE4qCE4qKA4qKO4qKO4qCC4qCE4qCE4qGi4qGD4qGi4qKK4qKU4qKi4qCj4qGq4qGi4qKj4qCq4qGi4qGR4qGV4qGc4qGc4qGM4qKO4qKi4qCx4qCo4qGC4qGR4qCo4qCE4qCB4qGC4qGo4qO64qG94qGv4qGr4qCj4qCh4qCi4qKR4qKI4qCC4qCM4qGG4qOnCiPioITioILioIHioITioIjioITioITioITiopjiopziopXioITioITio7DiobjioJDioIzioIbioofioI7ioY7ioo7ioo7ioo7ioo7ioo7ioo7ioI7ioY7ioarioJjioIzioILioIHioIHioITiooDioITiooTioqLioprioq7ioo/ioJ7ioajiooLioJXioInioIzioaDioILioIzioozioKLio7oKI+KghOKjgOKjpOKjtOKjtuKjtuKjtuKiluKhp+KhkeKgrOKhgOKigOKhr+Khg+KhjOKgiOKgiOKghOKghOKgiOKghOKghOKghOKghOKghOKgguKggeKghOKghOKghOKghOKghOKghOKihOKiguKiouKiseKiseKiseKgseKioeKikeKgjOKiguKgoeKgoOKgoeKgoeKhguKgheKileKigeKiiuKijgoj4qO/4qO/4qK/4qG/4qCf4qCJ4qCE4qCB4qKw4qKM4qCq4qOA4qG44qCo4qKC4qCM4qGK4qKE4qKC4qCg4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qKA4qCg4qKQ4qKo4qOY4qKU4qK14qCx4qGD4qGD4qGV4qG44qCQ4qGB4qCM4qGQ4qGo4qCo4qKK4qCM4qGi4qKR4qKF4qCq4qGw4qGxCiPio4/io67io6Tio6Tio6TioaTioITioK7ioo/ioKfio6PioqPioo7ioKjioITioITioKjioorioqrioqrioavioarioYrioZDioZDioZDioYzioazioarioario47iopfioZXioY7ioaPioIPiooXioIrioIbioKHioKDioYHioKLioZHioZDioozioozioKLioZHioYzioobioo7ioI7ioKrioIgKI+Khv+KhneKgr+Kij+Kgk+KghOKghOKigOKikOKgiOKhjuKhjuKhjuKghOKgiOKghOKgoeKiguKgguKhleKhleKhleKgleKijOKijOKiouKiseKiuOKhuOKjquKiruKho+Khk+KgjOKgoOKikeKgoeKiiOKgjOKijOKiguKgquKgqOKhguKjiuKgouKhouKio+KiseKguOKgkeKggeKghOKhgOKiggoj4qCB4qOI4qOA4qOA4qOA4qGA4qCE4qKQ4qCU4qCQ4qKo4qKi4qKj4qCK4qKA4qCo4qCo4qKQ4qCQ4qG44qG44qGq4qGx4qGR4qGM4qGG4qGH4qGH4qOP4qKu4qKq4qKq4qCK4qCE4qKR4qKQ4qCo4qGQ4qKM4qCi4qGq4qGY4qKM4qCi4qGi4qKj4qCq4qCK4qCE4qCE4qKA4qCC4qCB4qCE4qKCCiPio7/io7/io7/io7/ioIvioITioITioITioIzioKjioITioaPioZHiooXioITioITioKjiopDioKjiorDiorHioqPioqPioqriorjioqjioZrio57iopzioo7ioo7ioo7ioKrioJDioITioYbioaPioarioYrioarioYLioarioZjioYzioY7ioIrioITioZDioIjioYDiooLioIjioITioYHioYIKI+Khn+Kgn+KgneKgg+KghOKghOKghOKghOKijOKgquKghOKho+KgiuKghOKjt+KjhOKghOKghOKgjOKiuOKiuOKgseKhseKhoeKho+Kho+Khs+KhleKhh+Khh+Khh+KgpeKgkeKghOKioeKikeKgleKilOKikeKglOKhjOKhhuKgh+KggeKhgOKghOKggeKghOKiguKgkOKgoOKgiOKghOKiguKgkAoj4qOg4qOk4qO04qOk4qGk4qCE4qCE4qCE4qKQ4qCF4qCF4qGK4qCM4qCE4qO/4qO/4qO34qOk4qOk4qOC4qOF4qOR4qCw4qCo4qCi4qKR4qOV4qOc4qOY4qOo4qOm4qOl4qOs4qCE4qKQ4qKF4qKK4qKi4qKh4qCj4qCD4qCE4qGQ4qCg4qCE4qGC4qCh4qKI4qCg4qCI4qCE4qCh4qCI4qCE4qCoCiPio7/io7/io7/ioZ/ioITioITioITioITioITioozioKLioqjioKjioITiorniopvior/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ior/ioJ/ioITiorDiorDiorHioJHioIHiooDioJDioYDioILioITioKHioJDioJDioYDioILioYHioIzioKDioIHioIziopAKI+Khn+KgneKgiOKghOKghOKghOKghOKghOKgguKgoOKhkeKhseKikOKghOKiuOKhsuKhoOKghOKgieKgmeKgu+Kgv+Kjv+Kgv+Kgv+Kim+Kgq+KhqeKhs+KjuOKgvuKggeKigOKiouKgo+Kgg+KghOKgoOKgkOKhgOKgguKghOKgoeKgiOKghOKhgeKgguKghOKgoeKgkOKiiOKgoOKggeKgjOKgoAoj4qCE4qCE4qOA4qOk4qOk4qOA4qGA4qCE4qCC4qCE4qCQ4qKM4qCG4qKV4qCI4qOX4qKl4qKj4qKh4qKR4qKM4qGi4qGi4qKF4qKH4qKH4qKv4qK+4qG94qCD4qKA4qCU4qGF4qCB4qCE4qCE4qCo4qKA4qCh4qCQ4qCI4qCE4qCh4qKI4qCQ4qGA4qCF4qCM4qCg4qCB4qGC4qCE4qCh4qKI4qCQCiPio77io7/ior/iob/iob/ioIfioITioITioITioYDiooDioKLioK3ioobioKbiob/iobfiobfiobXiobfiobfio7Xior3ioa7io7fior3iob3ioZPioKTioKTioJXioYHioKDioITioIXioITioIXioITioILioIzioKDioKHioIjioITiooLioJDioKDioKjioKDioIHioITiooLioKHioJDioYg=").decode('utf-8')
+
+    if "Jun 07" in start_time:
+        import base64
+        secret_hehe = base64.b64decode("I+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khv+Kgv+Kim+Kjm+KjqeKjreKjreKjreKjreKjmeKjqeKjreKjreKjreKjreKjmeKjm+Kgu+Kiv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qG/4qCf4qOL4qO14qO24qO/4qO/4qO/4qO/4qO/4qC/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qG34qOm4qOZ4qC74qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/iob/ioovio7Tio7/io7/ioZ/iob/iorvio7/io7/ioZ/io7/ioLjio7/ioZnio7/io7/io4fiorvio7/io7/io7/io7/io7/io7fio43iobvio7fio6ziobvio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khv+Kio+KjtuKiv+Khv+Kii+KgjeKisOKgg+KjvuKjv+Kjv+KioeKjv+KhhuKiv+Kjp+KgueKjv+Kjv+KjhuKiu+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjpuKhueKjt+KjjOKgu+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qCP4qO04qG/4qGh4qCL4qG04qKj4qCi4qCD4qO84qO/4qO/4qKD4qO+4qO/4qGH4qOM4qC74qO34qGI4qC74qK/4qOm4qGZ4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO34qOM4qK/4qO34qGc4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioovio7zioZ/ioIHioITio6jioJ7ioYHiooDio77io7/iob/iooPio77io7/ioo/io7Tio7/io7fio67io5nioYLioITioKjiopnioYLioJnioLvior/io7/io7/io7/io7/io7/io6fioZnior/io4biorvio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khn+KjuOKjv+Kgg+KjtOKjtuKjv+KgluKjo+KjvuKjv+Kgn+KjoeKhvuKgn+Kjq+KjvOKjv+Kjv+Kjv+Kjv+Kjv+Kjt+KjtuKjpOKjvOKjt+KjtuKjpuKjrOKjmeKhu+Kiv+Kjv+Kjv+Kjv+Kjt+KjnOKgv+KjjuKiu+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qG/4qKg4qO/4qOv4qO84qG/4qKf4qOh4qO+4qC/4qKb4qOh4qOk4qO04qO24qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO34qOs4qGZ4qO/4qO/4qO/4qO34qO24qOG4qC54qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPio7/io7/io7/io7/io7/io7/io7/io7/io7/ioIPio77io7/io7/io6bio6Tio6TiooDio7bio77iopvioa3ioJDioJLioJLioKzioZvior/io7/io7/iorjio7/io7/ioYzio7/io7/iob/ioovioIXioJLioJDioJLioqzioZ3ior/io7fioZjio7/io7/io7/io7/io7/io7fioZzior/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KiuOKjv+Kjv+Kjv+Kjv+Kjv+Kig+KjvuKjv+KhoeKhj+KggOKgkOKggOKgguKggOKjiOKjvOKjv+Khh+KivuKjv+Kjv+KhhuKiv+Kjv+Kjp+KjgOKggOKgsOKgoOKgheKggOKiueKhjuKjv+Kjt+KhmOKjv+Kjv+Kjv+Kjv+Kjv+Khv+Kgt+KgrOKimeKiu+Kiv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qK44qO/4qO/4qO/4qO/4qGP4qO84qO/4qO/4qO/4qG/4qC24qC24qC24qKe4qOr4qO84qO/4qCf4qOh4qOt4qO24qOm4qO94qOM4qC74qO/4qOm4qOZ4qGy4qC24qC24qC24qK/4qO/4qO/4qO/4qOn4qC44qO/4qO/4qO/4qO/4qO/4qOm4qOk4qOt4qGt4qKA4qO/4qO/4qO/4qO/4qO/CiPio7/io7/ioZ/iorvio7/io7/io7/io7/ioY/io7jio7/io7/io7/iob/ioqDio7/io7/io7/io7/io7/io7/io7/io7/io7/ioJ/ioovio7Tiob/ioJPioLnio7/ioY/ioJnioL/iorfio47iorviobvio7/io7/io7/io7/io7/io7/io7/io7/io7/ioYbiorvio7/io7/io7/io7/io7/ioZ/ioonio5LioYHio7zio7/io7/io7/iob8KI+Kjv+Kjv+Kjt+KgoOKjieKhm+Kgv+Kim+KjoOKjv+Kjv+Kjv+Kjv+Khh+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khv+Kii+KjteKjv+KjpuKjm+KjoOKjtOKjvuKjv+Kjt+KjtuKjpOKjm+Kjm+KjvOKjv+KjpuKjmeKiv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjt+KiuOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khv+KioeKjv+Kjv+Kjv+Khv+Kgngoj4qO/4qCL4qKb4qC34qCN4qCb4qK74qO/4qO/4qO/4qO/4qO/4qO/4qKw4qO/4qO/4qO/4qO/4qO/4qG/4qOr4qO24qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO34qON4qK74qO/4qO/4qO/4qO/4qO/4qK44qO/4qO/4qO/4qO/4qO/4qO/4qG/4qOh4qO+4qO/4qO/4qO/4qO/4qGMCiPio7/ioIDioKbiobvior/io7/io7/io7/io7/io7/io7/io7/io5/iorjio7/io7/io7/io7/ioo/io7Tio7/io7/io7/ioL/ioJ/ioJvio5vioZvioInioInio4nioInioIniopvio5vioJvioZvioL/ioL/io7/io7/io7/io7fiobnio7/io7/io7/io7/iorjio7/io7/io7/io7/ioJ/io6vioLTioJ/io7vio7/io7/io7/iob/ioIEKI+Kjv+KjhuKgs+KjpuKjpOKjveKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjl+KiuOKjv+Kjv+Kjv+Kgh+KjvuKjv+Khn+Kgi+KggOKjrOKioeKjtuKjjuKjsOKjv+Kjv+KjgOKjvuKjv+Kjt+KjseKjtuKhjuKjpeKhlOKhguKijeKiv+Kjv+Kjt+KiueKjv+Kjv+Khn+KiuOKjv+Kjv+Kgv+Kjt+KhtuKgluKjq+KjtOKjv+Khv+Kgj+KggeKggOKgkgoj4qO/4qO/4qCj4qCc4qC74qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qC44qO/4qO/4qGP4qK44qO/4qGP4qKg4qK44qKH4qO/4qK74qO/4qO/4qO/4qO/4qO/4qGb4qO/4qO/4qO/4qK/4qO/4qC/4qO/4qOH4qO/4qKI4qCC4qK54qO/4qGM4qO/4qO/4qGH4qO/4qG/4qCb4qCm4qCE4qOA4qO/4qG/4qCJ4qCB4qCA4qCA4qCA4qCA4qCACiPio7/io7/io7fio6zioZDioLvior/ior/io7/io7/io7/io7/io7/ioYbiorvio7/io7/iorjio7/ioIDioobioobioKPioI3ioIDioIDioIDioIjioInioIDioIDioIDioIDioIDioIDioIDioIDioIDiopLio4vioJ/ioYTioIjio7/ioYfio7/iob/iorDiob/iooHio7bio6Tio43ioLvioIHioIDioIDioIDioIDio4Dio6Dio4Dio4AKI+Kjv+Kjv+Kjv+Kjv+Kjt+KjgOKgqOKivOKjv+Kjv+Kjv+Kjv+Kjv+Kjp+KguOKjv+Kjv+KiuOKjv+KggOKgmOKgiuKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKgiOKgieKgkOKggeKggOKjv+Kio+Kjv+Kgh+KhvOKig+KjvOKjv+Kjv+Kjv+KjpuKhkOKituKjtuKjtOKjtuKjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO34qO24qOk4qOt4qOt4qOE4qCZ4qK/4qOG4qK74qO/4qGM4qO/4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qOv4qO84qG/4qKA4qO04qO/4qO/4qO/4qO/4qGP4qK/4qO34qOE4qGZ4qK+4qO/4qO/4qO/4qO/4qO/CiPio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioJ/ioqDioYbiorLio6zioYjio7/io7/io7/ioYTioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiorjio7/io7/ioYfio77io7/io7/io7/io7/io7/io7/iorjio7/io7/io7/ioYTior/io7/io7/io7/io78KI+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kgn+KjoOKjvuKjv+Kjt+KguOKjv+Khh+Kiu+Kjv+Kjv+Khh+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjuOKjv+Kjv+KioOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khj+KjvOKjv+Kjv+Kjv+Khh+KguOKjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qG/4qCb4qCw4qO/4qO/4qO/4qO/4qOG4qK54qO/4qC44qO/4qO/4qO/4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qO/4qO/4qGf4qO44qO/4qO/4qO/4qO/4qO/4qGf4qOw4qO/4qO/4qO/4qG/4qKB4qO34qOk4qG54qO/4qO/CiPio7/io7/io7/io7/ioZ/ioonio7Tio77io4bioLnio7/io7/io7/io7/io4bioLvioYbio7/io7/io7/ioYTioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioqDio7/io7/ioIfio7/io7/io7/io7/iob/ioovio7Tio7/io7/io7/ioJ/io6Dio77io7/io7/io7fioYzior8KI+Kjv+Kjv+Kjv+Kgi+KjtOKjv+Kjv+Kjv+Kjv+Kjt+KhiOKgu+Kjv+Kjv+Kjv+Kjv+Kjp+KiuOKjv+Kjv+Khh+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKiuOKjv+Kjv+KisOKjv+Kjv+Kjv+Kjv+Kjt+Kjv+Kjv+Kjv+Khv+Kig+KjtOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+KhjAoj4qO/4qO/4qKD4qO+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qOm4qGI4qC74qO/4qO/4qO/4qGI4qO/4qO/4qOn4qKg4qKk4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC04qCG4qO+4qO/4qGP4qO44qO/4qO/4qO/4qO/4qO/4qO/4qG/4qKL4qO04qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPio7/ioIfio77io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7bio4zioLvior/ioYfior/io7/io7/ioLDior/ioYLioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiooDio7/ioIfio7/io7/ioYfio7/io7/io7/io7/io7/iob/ioovio7Tio77io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+Khv+KiuOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjt+KjtuKjpuKiuOKjv+Kjv+KhhOKiv+Kjn+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjm+Kgu+KiuOKjv+Kjv+KigeKjv+Kjv+Kjv+Kgn+KjgeKjtOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qGH4qO+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGA4qO/4qO/4qOH4qCZ4qOr4qOk4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC44qC/4qGH4qO44qO/4qGf4qK44qC/4qKL4qOl4qO+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPioIfio7/io7/io7/io7/io7/io4bioLjio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioYfiorvio7/io7/ioYTioL/io6/ioYTioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiobvio7/iooDio7/io7/ioY/io6Dio77io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+KggOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+KhgOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjt+KiuOKjv+Kjv+Kjh+KisOKjv+Kil+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKitOKjp+KgmeKiuOKjv+Kjv+Kgg+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qCw4qO/4qO/4qO/4qO/4qO/4qO/4qOn4qC44qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGI4qO/4qO/4qO/4qOG4qKj4qO/4qKD4qGA4qCA4qCA4qCA4qCA4qCA4qCA4qOA4qKw4qOn4qC74qKh4qO/4qO/4qO/4qKw4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPioJjio7/io7/io7/io7/io7/io7/io7/ioYbiorvio7/io7/io7/io7/io7/io7/io7/io7/io7/ioYfior/io7/io6/ioLvio6bioInior/ioYfio7/iobfio7biorLio7/ioZ7io7/ioLrioJ/io6Dior/io7/io7/ioYfio7jio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+KgiOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KhhOKiu+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KguOKjv+Kjv+Kjt+KhmeKit+KjpuKjlOKjiOKgieKgm+KgqeKgm+KigeKjieKjtOKhvuKii+KjvOKjv+Kjn+KigOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qGE4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGE4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGG4qK74qO/4qO/4qO/4qO34qOt4qOb4qC74qC/4qC/4qC/4qC/4qC/4qKb4qOr4qO04qO/4qO/4qO/4qCH4qO84qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPioYfio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioYTioLnio7/io7/io7/io7/io7/io7/io7/io7/ioYzioL/io7/io7/io7/io7/io7/iob/io7/io7/io7/io7/ior/ior/io7/io7/io7/iob/ioI/io7zio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78=").decode('utf-8')
+
+    if "Apr 20" in secret_hehe:
+        import base64
+        secret_hehe = base64.b64decode("II+KggOKggOKigOKhoOKgtOKgkuKgkuKimuKjk+KjsuKjtuKjpuKjpOKjgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qO04qOv4qO24qO24qG+4qC/4qCb4qOL4qOJ4qOl4qOk4qK24qG+4qO/4qO24qOE4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPiorjio7vio63iorXio7bio7Lior/io7vio5/io7/ioL7io73ioq/iob/io7Xioq/iob/io7fio4TioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KiuuKjv+KjnuKiv+KjvuKgn+Kgm+KgieKgieKgieKgieKgmeKgu+Kjv+KjveKir+Kjn+Kjs+Kiv+Kjt+KhgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCY4qO34qOv4qO/4qCB4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC74qO/4qK+4qO94qO74qOe4qO34qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIjioLvio7/io4bioYDioIDioIDioIDioIDioIDioIDioIDioIDioIDiorniob/io57io6fio5/iob7io4fioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKgieKgm+KgkuKggOKggOKggOKggOKggOKggOKggOKggOKggOKjv+Kjn+KhvuKjreKjn+Kjv+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK74qO+4qO94qOz4qOf4qO+4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio7/io5/iob7io6fio5/io77ioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio4Dio4DioKTioKTioJLioJLioKDioKTio4DioYDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKioOKjv+Kjr+Kjn+Kit+Kjq+Khn+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKhoOKikuKjieKgpeKggOKgkuKgguKgieKggeKggOKghOKggOKgieKgkeKgpuKjhOKhgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKA4qO+4qOf4qG+4qOt4qK/4qO94qCD4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKA4qCe4qCJ4qCB4qCA4qKA4qCA4qCC4qKA4qCC4qCI4qCg4qCA4qKB4qCI4qCA4qCE4qCA4qCI4qCT4qCm4qOE4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKA4qOACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiooDio77io5/iob7io73ioq/io5/ioY/ioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiorDio7nioIDioIDiobDioIPioIDioYDioILioojioIDioKDioIjiooDioIDioYHioITioIjioYDioKDioIHioKDioIjioJDioIDioYDioIDioJnioKLio4TioIDioIDioIDioIDioIDioIDio4DioKTio57ioL3ioZ4KI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKioOKjvuKjn+KhvuKjveKir+Kjn+KgnuKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjv+KggOKjp+KgnOKggeKigOKgkOKggOKhkOKggOKhgOKgguKgkOKggOKgoOKggOKhgOKgguKigOKgkOKggOKggeKisOKhjOKggOKhgOKggeKgoOKggeKggOKgmeKgouKjgOKgpOKgluKgi+Kgk+KgieKigOKjvuKghwoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qO04qO/4qOf4qG+4qO94qKv4qO/4qCL4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK44qK/4qCA4qC44qGG4qCA4qCC4qKA4qCC4qKA4qCQ4qCA4qCg4qCB4qKI4qCA4qCQ4qCA4qGQ4qCA4qCg4qCI4qKQ4qKu4qO34qCA4qCA4qCM4qCA4qCE4qCB4qCg4qCA4qKA4qCA4qCg4qCA4qCE4qKC4qO+4qGf4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioqDio77io7/io7Pioq/io7/io7nioJ/ioIHioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio4DiobTior7ioZvioIDioYDioLniopfioK7io4TioYDioKDioIDioIzioIDioZDioIDioKDioIHioKDioIDioITio6HioJbioInio7zio7vioILioIjiooDioJDioIDioIzioIDioZDioIDioYDioILioITio6LioZ/iob7ioIHioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKjtOKjv+Kjn+KhvuKjveKhu+KgnuKggeKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKit+KggOKiuOKhl+KggOKgoOKigOKggOKhgOKggOKgieKgm+KgkuKgtuKgtuKgtuKgluKgm+KggeKigOKgkuKgieKhgOKgoOKisOKjt+Khj+KipOKjrOKjpOKjpOKirOKjgOKhkOKggOKghOKigOKikOKhvOKih+Khv+KggeKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qO+4qO/4qO74qK+4qG94qCL4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCI4qCz4qOk4qOA4qCg4qCB4qCA4qCE4qCA4qCM4qKA4qCQ4qCg4qCA4qGA4qCA4qCE4qCQ4qCI4qCA4qGA4qCC4qCA4qO04qO/4qCf4qCA4qCA4qCZ4qKz4qG+4qCu4qO34qOd4qG74qC24qG04qKv4qO54qG/4qCB4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDiorjio7/io7Piob/ioIvioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiorDio7/io7/io7/io7fio77io6bio6zio4Tio4Dio4DioYLioJDioIDioojioIDioILioojioIDioITioKDioInioJ/ioIHioYDioKDiooHio4Lio4DiobzioILioIDioInioJnioLviorfio6fioJ/ioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKiuOKjv+KhveKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKigOKjv+Kjv+Kjv+KjveKjv+Kjv+Kgj+Kiv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjtuKjtuKjtuKjtuKjvuKjv+Kjv+Kjv+Kjv+Kjv+KhhOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCI4qK/4qGH4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK44qO/4qO/4qO/4qO/4qO/4qG/4qCA4qK44qO/4qO/4qOf4qOb4qC74qK/4qO/4qGf4qCA4qK44qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qOH4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioLnio4bioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio7/io7/io7/io7/io7/io7/io7/io6Tio6/io7/io7/io7/io7/io7fio7/io7/io4fioIDiooDio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKgiOKgs+KghOKhgOKggOKggOKggOKhoOKjpOKjpOKjpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKipOKjgOKjgOKjgOKjgOKjgOKhgOKggOKggOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjreKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kiv+Kjv+KjpuKjvuKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCB4qCA4qKw4qO+4qK/4qO94qO74qGH4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCJ4qCJ4qCJ4qCJ4qCZ4qCb4qCb4qCb4qCb4qCb4qO/4qGf4qCb4qC/4qK/4qO/4qO/4qO/4qO/4qOv4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioJjio7/io5/io77io7PioYfioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio4Dio4Dio4Dio4Dio4Dio4Dio4Dio4Dio4Dio4zio4Dio4Dio6Dio6Tio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/iob/ioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKgiOKgm+KgmuKgm+KgkuKgkuKgm+KgkuKgkuKggOKggOKgiOKgieKgieKgieKgieKgieKgieKgieKgieKgieKgieKgieKgieKiu+Kjv+Kjv+Kjv+Kjv+Kgn+Kjv+Kiv+Kjv+Kiv+Khv+Kjv+Kjv+Kjv+Kjv+Kjv+Kiv+Khv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kgh+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKI4qG/4qGf4qO94qCP4qCA4qCY4qK/4qOm4qCv4qOd4qOz4qOb4qG84qOz4qKr4qO/4qO94qG+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGf4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiobTio4/io7Pio7nioY/ioIDioJDiooDioIDioIjioJvioLfioLbioKfioL7ioLfioL/iorvioZfioIniornio7/io7/io7/io7/io7/io7/ioZ/ioqDio6DioYDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKhv+KhnOKipuKjv+KggOKigOKggeKioOKjpOKjgeKgoOKggOKjuOKjhOKggOKhgOKigOKgiOKiu+KjpuKhgOKgu+Kjv+Kjv+Kjv+Kjv+Kgn+Kiv+KhjOKgmeKjo+KjhOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC54qOf4qO84qGP4qCA4qCg4qKA4qO+4qO/4qO/4qGE4qO84qO/4qO/4qOG4qCA4qCE4qCQ4qCA4qK74qO34qOE4qCJ4qC54qCL4qCB4qCA4qGA4qK74qOm4qCA4qKT4qGi4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioJjior/ioYfioIDioZDiorjio7/io7/io7/io7/io7/io7/io7/io7/ioIDioKDioIjioIDioITioJvio77io7fioITioIDioILioIHioYDioITiorvio7fioYDioKvio7fioYDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjp+KggOKigOKgmOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KggOKigOKgguKggeKgoOKjuOKgn+KggeKggOKghOKggeKgoOKggOKgoOKiiOKjv+Khv+KjhuKgmOKis+KhhOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKg4qO/4qGA4qKA4qCg4qC54qO/4qO/4qO/4qO/4qO/4qO/4qGH4qCA4qGA4qCE4qCI4qGA4qK/4qOE4qGA4qCM4qCA4qGI4qCA4qKE4qOx4qKv4qO/4qOf4qG94qO34qOE4qCY4qKF4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiooDiob7ioofiobfio4TioIDioYDioJnioL/io7/io7/io7/io7/ioIfioIDioYDioITioILiooDioqjio7/io7/io7fio6bio7Tio7jio6/io73io77ioZ/io77ior3io7Pior/io6bioYDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjvOKij+Khs+KjjuKhneKjs+KjhOKggOKhgOKgiOKgmeKgv+Kgi+KggOKhgOKghOKggOKgguKhgOKiuOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjveKjq+KjvuKgn+Kgi+KggeKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK84qOL4qKu4qC14qOa4qG84qGx4qKO4qGf4qOm4qOQ4qCA4qCg4qCA4qCQ4qCA4qCg4qCI4qCA4qCE4qK44qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qC34qCL4qCB4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIjioLvio67io53iobLio5Xioavior3iobjiopbio63io5vioLbio6Tio4HioIjioIDioITioIHioKDiorjio7/io7/io7/io7/io7/io7/ioIPioIHioYfioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKigOKjtOKjvuKjv+Kjv+Kjt+Kjp+Kjj+Kjp+Kim+KhvOKipuKhueKjmuKhpeKij+Khn+Kjs+KipuKjnOKisuKgvOKju+Kjn+Kjn+Kjv+Kjv+Kjv+KjtuKjvuKgl+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGP4qCJ4qCb4qCb4qCb4qCb4qCb4qCb4qK74qO+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGP4qCB4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIjioJnioL/io7/io7/io7/io7/io7/ioJ/ioIHioIDioIDioIDioIDioIDioIDioIDiorjio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io4fioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggeKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKiuOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjpuKhgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC74qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGE4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIjioLvior/io7/io7/io7/io7/io7/io7/io7/io7/iob/ioIfioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKgiOKgieKgm+Kgm+Kgm+Kgm+Kgm+KgieKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggA==").decode("utf-8")
+
     sections.append(f"# Created on {start_time}")
     sections.append("# SCMT Configuration File for IntelliStar 1 Domestic")
     sections.append("# Generated by IntelliStar Config Generator by @sspwxr (raii)")
+    sections.append("#")
+    sections.append(secret_hehe)
+    sections.append("#")
     sections.append("Log.info('scmt config started')")
     sections.append("#")
     sections.append("def scmtRemove(key):")
@@ -793,11 +570,11 @@ def main() -> None:
     main_state = locale_data["location"].get("adminDistrictCode", [""])[0]
     main_country = locale_data["location"].get("countryCode", [""])[0]
 
-    nearby = asyncio.run(get_nearby_cities(locale_data))
-    print(f"\nNearby cities ({len(nearby)} found):")
-    for city in nearby:
-        print(f"  - {city['name']}, {city['stateProvince']} "
-              f"({city['distToOrigin']} miles)")
+    nearby = prompt_for_nearby_locations(max_nearby=7)
+    
+    print(f"\nNearby locations entered: {len(nearby)}")
+    for record in nearby:
+        print(f"  - {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')}")
 
     config = AggregatedConfig()
     all_records: list[LocationRecord] = []
@@ -819,44 +596,36 @@ def main() -> None:
         )
         all_records.append(main_record)
         config.add_record(main_record)
-        print(f"  ✓ Database record found")
+        print(f"  Database record found")
         print(f"  TECCIs: {main_record.teccis}")
         print(f"  Coop ID: {main_record.coop_id}")
         print(f"  Zone ID: {main_record.zone_id}")
         print(f"  Airport ID: {main_record.airport_id}")
     else:
-        print(f"  ⚠ No database record found for {main_location_name}")
-        print(f"  → Will use data from nearby locations")
+        print(f"  No database record found for {main_location_name}")
+        print(f"  Will use data from nearby locations")
 
-    client = WeatherAPIClient()
     processed_loc_ids = {location_id}
     
-    for city in nearby:
-        try:
-            search_result = client.search_location(city['name'] + ", " + city['country'])
-            loc_id = search_result['location']['locId'][0][:8]
-            
-            if loc_id in processed_loc_ids:
-                print(f"\nSkipping duplicate: {city['name']} (ID: {loc_id})")
-                continue
-            
-            processed_loc_ids.add(loc_id)
-            
-            print(f"\nLooking up: {city['name']} (ID: {loc_id})")
-            record_data = get_record_by_location_id(loc_id)
-            
-            if record_data:
-                record = LocationRecord.from_db_record(record_data, name=city['name'])
-                all_records.append(record)
-                config.add_record(record)
-                print(f"  TECCIs: {record.teccis}")
-                print(f"  Coop ID: {record.coop_id}")
-                print(f"  Zone ID: {record.zone_id}")
-                print(f"  Airport ID: {record.airport_id}")
-            else:
-                print(f"  No record found")
-        except Exception as e:
-            print(f"  Error looking up {city['name']}: {e}")
+    # Nearby locations are already full database records
+    for record_data in nearby:
+        loc_id = record_data.get('locId', '')
+        name = record_data.get('prsntNm', '')
+        
+        if loc_id in processed_loc_ids:
+            print(f"\nSkipping duplicate: {name} (ID: {loc_id[:8]})")
+            continue
+        
+        processed_loc_ids.add(loc_id)
+        
+        print(f"\nAdding: {name} (ID: {loc_id[:8]})")
+        record = LocationRecord.from_db_record(record_data, name=name)
+        all_records.append(record)
+        config.add_record(record)
+        print(f"  TECCIs: {record.teccis}")
+        print(f"  Coop ID: {record.coop_id}")
+        print(f"  Zone ID: {record.zone_id}")
+        print(f"  Airport ID: {record.airport_id}")
 
     print("\n")
     print("AGGREGATED CONFIGURATION")
