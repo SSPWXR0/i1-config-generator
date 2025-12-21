@@ -23,7 +23,7 @@ LOCATION_SEARCH_ENDPOINT = f"{BASE_URL}/location/search"
 
 print("=" * 60)
 print("IntelliStar Configuration Generator")
-print("Created by @sspwxr (raii), version 1-2025-12-19")
+print("Created by @sspwxr (raii), version 1-2025-12-20")
 print("=" * 60)
 
 @contextmanager
@@ -348,21 +348,21 @@ wxdata.setInterestList('county','1',[{quote_list(config.county_ids)}])"""
 def compile_i1_currentconditions(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
     loc_name = config.name
     output_current_conditions = f"""d = twc.Data()
-d.obsStation = ['{config.tecci_ids[0] if config.tecci_ids else ""}']
-d.locName = ['{loc_name}']
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.locName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
 d.elementDuration = 6
 dsm.set('Config.1.Cc_CurrentConditions', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = ['{config.tecci_ids[0] if config.tecci_ids else ""}']
-d.locName = ['{loc_name}']
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.locName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
 d.activeVocalCue = 1
 d.activeVocal = 1
 dsm.set('Config.1.Local_CurrentConditions', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = ['{config.tecci_ids[0] if config.tecci_ids else ""}']
-d.schedule = [((11,20,16,0,0), (11,23,16,0,0)),((12,16,16,0,0), (1,4,16,0,0)),((5,25,16,0,0), (9,1,16,0,0)),]
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.schedule = [((11,22,16,0,0), (11,24,16,0,0)),((12,15,16,0,0), (1,5,16,0,0)),((5,18,16,0,0), (9,3,16,0,0)),]
 d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
 dsm.set('Config.1.Local_SchoolDayWeather', d, 0, 1)
 #
@@ -373,19 +373,30 @@ d.longitude = {config.lon}
 dsm.set('Config.1.Ldl_SunriseSunset', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = ['{config.tecci_ids[0] if config.tecci_ids else ""}']
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
 d.timeDuration = 5
 d.tempDuration = 8
 dsm.set('Config.1.TimeTemp_Default', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = ['{config.tecci_ids[0] if config.tecci_ids else ""}']
-d.obsLocName = ['{loc_name}']
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.obsLocName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
 dsm.set('Config.1.Ldl_CurrentApparentTemp', d, 0, 1)
 #
+ds.commit()
+dsm.set('Config.1.Ldl_CurrentCeiling', d, 0, 1)
+dsm.set('Config.1.Ldl_CurrentDewpoint', d, 0, 1)
+dsm.set('Config.1.Ldl_CurrentGusts', d, 0, 1)
+dsm.set('Config.1.Ldl_CurrentHumidity', d, 0, 1)
+ds.commit()
+dsm.set('Config.1.Ldl_CurrentPressure', d, 0, 1)
+dsm.set('Config.1.Ldl_CurrentSkyTemp', d, 0, 1)
+dsm.set('Config.1.Ldl_CurrentVisibility', d, 0, 1)
+dsm.set('Config.1.Ldl_CurrentWinds', d, 0, 1)
+#
 d = twc.Data()
-d.obsStation = ['{config.tecci_ids[0] if config.tecci_ids else ""}']
-d.obsLocName = ['{loc_name}']
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.obsLocName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
 dsm.set('Config.1.Ldl_CurrentMTDPrecip', d, 0, 1)
 #
 d = twc.Data()
@@ -398,9 +409,54 @@ d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
 dsm.set('Config.1.Local_Climatology', d, 0, 1)
 #
 d = twc.Data()
+d.climId = '{config.climate_ids[0] if config.climate_ids else ""}'
+d.latitude = {config.lat}
+d.longitude = {config.lon}
+dsm.set('Config.1.Local_Almanac', d, 0, 1)
+#
+d = twc.Data()
 d.obsStation = [{quote_list(config.tecci_ids)}]
-d.locName = [{quote_list([record.name for record in all_records])}]
-dsm.set('Config.1.Local_LocalObservations', d, 0, 1)"""
+d.climId = ['{config.climate_ids[0] if config.climate_ids else ""}']
+d.latitude = {config.lat}
+d.longitude = {config.lon}
+d.locName = [{quote_list([record.name for record in all_records[:1]])}]
+d.coopId = [{quote_list(config.coop_ids[:1])}]
+d.fcstHighOffset = 0
+d.fcstLowOffset = 0
+dsm.set('Config.1.Local_RecordHighLow', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = '{config.tecci_ids[0] if config.tecci_ids else ""}'
+d.locName = '{loc_name.upper()}'
+d.heatIndexThreshold = 102
+dsm.set('Config.1.Local_HeatSafetyTips', d, 0, 1)
+#
+d = twc.Data()
+d.zone = '{config.zone_ids[0] if config.zone_ids else ""}'
+d.activeVocalCue = 1
+d.activeVocal = 1
+dsm.set('Config.1.Local_NWSHeadlines', d, 0, 1)
+#
+d = twc.Data()
+d.crawlRate = 3
+dsm.set('Config.1.Ldl_HurricaneWatch', d, 0, 1)
+#
+d = twc.Data()
+d.displayMessage = 1
+dsm.set('Config.1.Ldl_LocalStarIDMessage', d, 0, 1)
+#
+d = twc.Data()
+d.displayMessage = 1
+dsm.set('Config.1.Ldl_NationalStarIDMessage', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[:8])}]
+d.locName = [{quote_list([record.name for record in all_records[:8]])}]
+dsm.set('Config.1.Local_LocalObservations', d, 0, 1)
+#
+d = twc.Data()
+d.activeVocalCue = 1
+dsm.set('Config.1.Local_RegionalDopplerRadar', d, 0, 1)"""
     return output_current_conditions
 
 def compile_i1_forecast(config: AggregatedConfig) -> str:
@@ -433,11 +489,6 @@ d.activeVocal = 1
 dsm.set('Config.1.Local_TextForecast', d, 0, 1)
 #
 d = twc.Data()
-d.locName = '{config.name}'
-d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
-dsm.set('Config.1.Fcst_ExtendedForecast', d, 0, 1)
-#
-d = twc.Data()
 d.locName = '{loc_name}'
 d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
 dsm.set('Config.1.Fcst_TextForecast', d, 0, 1)
@@ -446,6 +497,27 @@ d = twc.Data()
 d.locName = '{loc_name}'
 d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
 dsm.set('Config.1.Fcst_DaypartForecast', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['{loc_name.upper()}']
+d.coopId = ['{config.coop_ids[0] if config.coop_ids else ""}']
+dsm.set('Config.1.Local_DaypartForecast', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Ldl_ExtendedForecast', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.startDate = (5,1)
+d.endDate = (9,30)
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Ldl_UVForecast', d, 0, 1)
+#
+d = twc.Data()
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Local_OutdoorActivityForecast', d, 0, 1)
 #
 ds.commit()
 dsm.set('Config.1.Ldl_HourlyForecast', d, 0, 1)
@@ -502,6 +574,135 @@ d.obsStation = [{quote_list(airport_teccis)}]
 dsm.set('Config.1.Tag.General.airportData', d, 0, 1)"""
     return output
 
+
+def compile_i1_airport_delays(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
+    """Generate airport delay conditions configuration."""
+    airport_records = [r for r in all_records if r.airport_id]
+    
+    if not airport_records:
+        return ""
+    
+    airport_ids = [r.airport_id for r in airport_records[:3]]
+    airport_teccis = [r.teccis[0] if r.teccis else "" for r in airport_records[:3]]
+    airport_names = [r.name + " Arpt" for r in airport_records[:3]]
+    display_flags = [1] * len(airport_ids)
+    
+    output = f"""d = twc.Data()
+d.airportId = [{quote_list(airport_ids)}]
+d.obsStation = [{quote_list(airport_teccis)}]
+d.locName = [{quote_list(airport_names)}]
+d.displayFlag = {display_flags}
+dsm.set('Config.1.Ldl_AirportDelayConditions', d, 0, 1)"""
+    return output
+
+
+def compile_i1_travel_forecast(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
+    """Generate travel forecast configuration."""
+    if len(all_records) < 2:
+        return ""
+    
+    travel_records = all_records[1:4]  # Use 2nd through 4th records for travel
+    loc_names = [r.name for r in travel_records]
+    coop_ids = [r.coop_id for r in travel_records if r.coop_id]
+    
+    if not coop_ids:
+        return ""
+    
+    output = f"""d = twc.Data()
+d.locName = [{quote_list(loc_names[:len(coop_ids)])}]
+d.coopId = [{quote_list(coop_ids)}]
+dsm.set('Config.1.Ldl_TravelForecast', d, 0, 1)"""
+    return output
+
+
+def compile_i1_scmt_removes() -> str:
+    """Generate scmtRemove calls for all products."""
+    products = [
+        'Config.1.Local_OutdoorActivityForecast',
+        'Config.1.Ldl_LocalStarIDMessage',
+        'Config.1.Ldl_HurricaneWatch',
+        'Config.1.Local_Climatology',
+        'Config.1.Cc_CurrentConditions',
+        'Config.1.Local_RadarSatelliteComposite',
+        'Config.1.Local_NWSHeadlines',
+        'Config.1.Ldl_AirportDelayConditions',
+        'Config.1.Ldl_CurrentApparentTemp',
+        'Config.1.Ldl_UVForecast',
+        'Config.1.Ldl_AirQualityForecast',
+        'Config.1.Local_EventForecast',
+        'Config.1.Local_GetawayForecast',
+        'Config.1.Local_LocalObservations',
+        'Config.1.TimeTemp_Default',
+        'Config.1.Local_TrafficReport',
+        'Config.1.Local_TextForecast',
+        'Config.1.Ldl_NationalStarIDMessage',
+        'Config.1.Ldl_TravelForecast',
+        'Config.1.Ldl_SunriseSunset',
+        'Config.1.Local_SchoolDayWeather',
+        'Config.1.Fcst_TextForecast',
+        'Config.1.Local_RecordHighLow',
+        'Config.1.Ldl_ExtendedForecast',
+        'Config.1.Local_7DayForecast',
+        'Config.1.Local_ExtendedForecast',
+        'Config.1.Fcst_ExtendedForecast',
+        'Config.1.Local_MarineForecast',
+        'Config.1.Local_AirQualityForecast',
+        'Config.1.Local_HeatSafetyTips',
+        'Config.1.Local_Almanac',
+        'Config.1.Ldl_TrafficTripTimes',
+        'Config.1.Fcst_DaypartForecast',
+        'Config.1.Local_CurrentConditions',
+        'Config.1.Local_TrafficOverview',
+        'Config.1.Local_Tides',
+        'Config.1.Local_DaypartForecast',
+        'Config.1.Local_TrafficFlow',
+        'Config.1.Ldl_CurrentMTDPrecip',
+    ]
+    
+    lines = [f"scmtRemove('{product}')" for product in products]
+    return "\n".join(lines)
+
+
+def compile_i1_bulletin_override() -> str:
+    """Generate bulletin and override configuration."""
+    return """#
+# BLOCK BEGIN
+d = twc.Data()
+dsm.set('Config.1.Override', d, 0)
+d = twc.Data()
+d.activeVocal = 1
+dsm.set('Config.1.Bulletin_Default', d, 0)
+# BLOCK END
+#
+d = twc.Data()
+d.sponsorLogo = ''
+dsm.set('Config.1', d, 0, 1)"""
+
+
+def compile_i1_vocal_schedule() -> str:
+    """Generate vocal local schedule configuration."""
+    return """scmtRemove('Config.1.VocalLocalSchedule')
+d = twc.Data()
+d.OffTimes = ( )
+dsm.set('Config.1.VocalLocalSchedule', d, 0, 1)
+#
+scmtRemove('Config.1.Ldl_LASCrawl')
+scmtRemove('Config.1.LASCrawl')"""
+
+
+def compile_i1_non_image_maps() -> str:
+    """Generate non-image maps configuration."""
+    return """#
+#  Non Image Maps
+#
+d = [
+'Config.1.Local_MetroForecastMap',
+'Config.1.Local_MetroObservationMap',
+'Config.1.Local_RegionalForecastMap',
+'Config.1.Local_RegionalObservationMap',
+]
+dsm.set('Config.1.nonImageMaps', d, 0)"""
+
 def compile_full_config(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
     from datetime import datetime
 
@@ -548,10 +749,22 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
     sections.append("#")
     sections.append(compile_i1_airport_data(config, all_records))
     sections.append("#")
+    sections.append(compile_i1_bulletin_override())
+    sections.append("#")
+    sections.append(compile_i1_vocal_schedule())
+    sections.append("#")
+    sections.append(compile_i1_scmt_removes())
+    sections.append("#")
+    sections.append(compile_i1_non_image_maps())
+    sections.append("#")
     sections.append("#")
     sections.append(compile_i1_currentconditions(config, all_records))
     sections.append("#")
     sections.append(compile_i1_forecast(config))
+    sections.append("#")
+    sections.append(compile_i1_airport_delays(config, all_records))
+    sections.append("#")
+    sections.append(compile_i1_travel_forecast(config, all_records))
     sections.append("#")
     
     end_time = datetime.now().strftime("%a %b %d %H:%M:%S %Z %Y")
