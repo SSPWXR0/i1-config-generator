@@ -13,13 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
-import requests
-
-API_KEY = "e1f10a1e78da46f5b10a1e78da96f525"
 DB_PATH = Path("./LFRecord.db")
-
-BASE_URL = "https://api.weather.com/v3"
-LOCATION_SEARCH_ENDPOINT = f"{BASE_URL}/location/search"
 
 print("=" * 60)
 print("IntelliStar Configuration Generator")
@@ -80,33 +74,6 @@ def search_records_by_name(search_term: str) -> list[dict]:
         rows = cursor.fetchall()
 
     return [dict(row) for row in rows]
-
-class WeatherAPIClient:
-    """Client for Weather.com API interactions."""
-
-    def __init__(self, api_key: str = API_KEY):
-        self.api_key = api_key
-
-    def search_location(self, query: str) -> dict:
-        """
-        Search for a location by name.
-
-        Args:
-            query: Location name to search for.
-
-        Returns:
-            JSON response with location data.
-        """
-        params = {
-            "query": query,
-            "locationType": "city",
-            "language": "en-US",
-            "format": "json",
-            "apiKey": self.api_key
-        }
-        response = requests.get(LOCATION_SEARCH_ENDPOINT, params=params)
-        response.raise_for_status()
-        return response.json()
 
 
 def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
@@ -184,36 +151,49 @@ def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
     return nearby_locations
 
 
-def prompt_for_location() -> dict:
-    """Prompt user for location and return search results."""
-    location_name = input("Enter the location name: ")
-    client = WeatherAPIClient()
+def prompt_for_location() -> dict | None:
+    """Prompt user for location and return database record, searching LFRecord database directly."""
+    location_name = input("Enter the location name: ").strip()
     
-    try:
-        result = client.search_location(location_name)
+    if not location_name:
+        print("No location name provided")
+        return None
+    
+    # Search the database directly (same as nearby locations)
+    matches = search_records_by_name(location_name)
+    
+    if not matches:
+        print(f"No results found for '{location_name}' in database")
+        return None
+    
+    if len(matches) == 1:
+        # Single match - use it directly
+        record = matches[0]
+        loc_id = record.get('locId', '')[:8] if record.get('locId') else ''
+        print(f"Found: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {loc_id})")
+        print(f"  Coordinates: {record.get('lat', 'N/A')}, {record.get('long', 'N/A')}")
+        return record
+    else:
+        # Multiple matches - ask user to select
+        print(f"Multiple matches found ({len(matches)}):")
+        for idx, record in enumerate(matches, 1):
+            loc_id = record.get('locId', '')[:8] if record.get('locId') else ''
+            print(f"  [{idx}] {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {loc_id})")
         
-        if not result or 'location' not in result:
-            print(f"ERROR: No results found for '{location_name}'")
-            print(f"Raw API response: {result}")
-            raise ValueError(f"Location '{location_name}' not found")
-        
-        loc = result.get('location', {})
-        if not loc.get('city') or len(loc.get('city', [])) == 0:
-            print(f"ERROR: Location data is empty for '{location_name}'")
-            print(f"Raw location data: {loc}")
-            raise ValueError(f"No location data for '{location_name}'")
-        
-        print(f"Found: {loc.get('city', [''])[0]}, {loc.get('adminDistrictCode', [''])[0]} {loc.get('countryCode', [''])[0]}")
-        print(f"  Location ID: {loc.get('locId', [''])[0][:8]}")
-        print(f"  Coordinates: {loc.get('latitude', [0])[0]}, {loc.get('longitude', [0])[0]}")
-        
-        return result
-        
-    except Exception as e:
-        print(f"\nERROR searching for location '{location_name}':")
-        print(f"   {str(e)}")
-        print(f"\nTip: Try being more specific (e.g., 'Dildo, NL' or 'Dildo, Newfoundland')")
-        raise
+        while True:
+            selection = input(f"Select (1-{len(matches)}): ").strip()
+            
+            try:
+                sel_idx = int(selection) - 1
+                if 0 <= sel_idx < len(matches):
+                    record = matches[sel_idx]
+                    print(f"Selected: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')}")
+                    print(f"  Coordinates: {record.get('lat', 'N/A')}, {record.get('long', 'N/A')}")
+                    return record
+                else:
+                    print(f"Invalid selection. Enter 1-{len(matches)}")
+            except ValueError:
+                print(f"Invalid input. Enter a number")
 
 @dataclass
 class LocationRecord:
@@ -775,13 +755,30 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
 
 def main() -> None:
     """Main entry point for the configuration generator."""
-    locale_data = prompt_for_location()
+    main_record_data = prompt_for_location()
+    
+    if main_record_data is None:
+        print("No location selected. Exiting.")
+        return
 
-    main_location_name = locale_data["location"]["city"][0]
-    main_lat = locale_data["location"]["latitude"][0]
-    main_lon = locale_data["location"]["longitude"][0]
-    main_state = locale_data["location"].get("adminDistrictCode", [""])[0]
-    main_country = locale_data["location"].get("countryCode", [""])[0]
+    main_location_name = main_record_data.get('prsntNm', '')
+    main_lat = main_record_data.get('lat')
+    main_lon = main_record_data.get('long')
+    main_state = main_record_data.get('stCd', '')
+    main_country = main_record_data.get('cntryCd', '')
+    location_id = main_record_data.get('locId', '')
+
+    # Convert lat/lon to float if they exist
+    if main_lat:
+        try:
+            main_lat = float(main_lat)
+        except (ValueError, TypeError):
+            main_lat = None
+    if main_lon:
+        try:
+            main_lon = float(main_lon)
+        except (ValueError, TypeError):
+            main_lon = None
 
     nearby = prompt_for_nearby_locations(max_nearby=7)
     
@@ -798,25 +795,20 @@ def main() -> None:
     config.state_code = main_state
     config.country_code = main_country
 
-    location_id = locale_data["location"]["locId"][0][:8]
-    print(f"\nMain Location ID: {location_id}")
+    print(f"\nMain Location ID: {location_id[:8] if location_id else 'N/A'}")
     
-    main_record_data = get_record_by_location_id(location_id)
-    if main_record_data:
-        main_record = LocationRecord.from_db_record(
-            main_record_data, 
-            name=main_location_name
-        )
-        all_records.append(main_record)
-        config.add_record(main_record)
-        print(f"  Database record found")
-        print(f"  TECCIs: {main_record.teccis}")
-        print(f"  Coop ID: {main_record.coop_id}")
-        print(f"  Zone ID: {main_record.zone_id}")
-        print(f"  Airport ID: {main_record.airport_id}")
-    else:
-        print(f"  No database record found for {main_location_name}")
-        print(f"  Will use data from nearby locations")
+    # Main location is already a full database record
+    main_record = LocationRecord.from_db_record(
+        main_record_data, 
+        name=main_location_name
+    )
+    all_records.append(main_record)
+    config.add_record(main_record)
+    print(f"  Database record found")
+    print(f"  TECCIs: {main_record.teccis}")
+    print(f"  Coop ID: {main_record.coop_id}")
+    print(f"  Zone ID: {main_record.zone_id}")
+    print(f"  Airport ID: {main_record.airport_id}")
 
     processed_loc_ids = {location_id}
     
