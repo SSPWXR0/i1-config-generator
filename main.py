@@ -206,16 +206,16 @@ def get_timezone_by_location_id(location_id: str) -> str | None:
     if init_fetch is not None:
         country_code = init_fetch["cntryCd"]
         if country_code == "US":
-            return tz.get(init_fetch["stCd"], "CST")
+            return tz.get(init_fetch["tmZnAbbr"], "CST")
         if country_code == "CA":
             return tz_canada.get(init_fetch["stCd"], "America/Regina")
         if country_code == "MX":
             return tz_mexico.get(init_fetch["stCd"], "America/Mexico_City")
-        return "CST6CDT"
+        else:
+            gmtDiff = init_fetch["gmtDiff"] / 1
+            return f"Etc/GMT{'+' if gmtDiff < 0 else '-'}{abs(int(gmtDiff))}"
 
-    timezone = row["timeZone"]
-    print(f"Found timezone: {timezone}")
-    return timezone
+    return "CST6CDT"
 
 def get_record_by_location_id(location_id: str) -> dict | None:
     with get_db_connection() as conn:
