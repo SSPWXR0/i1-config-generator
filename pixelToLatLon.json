@@ -1,0 +1,167 @@
+{
+    "domestic": {
+        "calibration_data": {
+            "Perris": {
+                "latLonCoordinates": [33.79499, -117.21833]
+            },
+            "Atlanta": {
+                "latLonCoordinates": [33.65, -84.42]
+            },
+            "Flat Rock": {
+                "latLonCoordinates": [39.36388, -85.825]
+            }
+        },
+        "Radar_LocalDoppler": {
+            "Perris": {
+                "mapCutCoordinates": [7524, 8334]
+            },
+            "Flat Rock": {
+                "mapCutCoordinates": [24552, 11436]
+            }
+        },
+        "Local_MetroDopplerRadar": {
+            "Perris": {
+                "mapCutCoordinates": [7752, 8276]
+            },
+            "Flat Rock": {
+                "mapCutCoordinates": [24853, 11426]
+            }
+        },
+        "Local_MetroForecastMap": {
+            "Perris": {
+                "mapCutCoordinates": [8050, 8475]
+            },
+            "Atlanta": {
+                "mapCutCoordinates": [25739, 8325]
+            },
+            "Flat Rock": {
+                "mapCutCoordinates": [24790, 11382]
+            }
+        },
+        "Local_MetroObservationMap": {
+            "Perris": {
+                "mapCutCoordinates": [8050, 8475]
+            },
+            "Atlanta": {
+                "mapCutCoordinates": [25739, 8325]
+            },
+            "Flat Rock": {
+                "mapCutCoordinates": [24790, 11382]
+            }
+        },
+        "Local_RegionalForecastMap": {
+            "Perris": {
+                "mapCutCoordinates": [5072, 7192]
+            },
+            "Flat Rock": {
+                "mapCutCoordinates": [21868, 10159]
+            }
+        },
+        "Local_RegionalObservationMap": {
+            "Perris": {
+                "mapCutCoordinates": [5072, 7192]
+            },
+            "Flat Rock": {
+                "mapCutCoordinates": [21868, 10159]
+            }
+        },
+        "Local_RegionalDopplerRadar": {
+            "Perris": {
+                "mapCutCoordinates": [6912, 7715]
+            },
+            "Atlanta": {
+                "mapCutCoordinates": [24452, 7617]
+            },
+            "Flat Rock": {
+                "mapCutCoordinates": [23774, 10709]
+            }
+        },
+        "NationalLdl_DopplerRadar": {
+            "Flat Rock": {
+                "mapCutCoordinates": [24711, 11438]
+            }
+        }
+    },
+    "weatherscan": {
+        "calibration_data": {
+            "Harrison": {
+                "latLonCoordinates": [36.2297, -93.1077]
+            },
+            "Dallas": {
+                "latLonCoordinates": [32.7767, -96.7970]
+            }
+        },
+        "Local_LocalDoppler": {
+            "Harrison": {
+                "mapCutCoordinates": [19931, 9334]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [19931, 9334]
+            }
+        },
+        "Local_RegionalForecastConditions": {
+            "Harrison": {
+                "mapCutCoordinates": [12019, 10668]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [12019, 10668]
+            }
+        },
+        "Local_RadarSatelliteComposite": {
+            "Harrison": {
+                "mapCutCoordinates": [3190, 1873]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [3190, 1873]
+            }
+        },
+        "Local_FrostFreezeWarnings": {
+            "Harrison": {
+                "mapCutCoordinates": [3073, 1467]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [3073, 1467]
+            }
+        },
+        "Local_SnowfallQpfForecast": {
+            "Harrison": {
+                "mapCutCoordinates": [3073, 1467]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [3073, 1467]
+            }
+        },
+        "Local_NationalTravelWeather": {
+            "Harrison": {
+                "mapCutCoordinates": [1451, 293]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [1451, 293]
+            }
+        },
+        "Local_EstimatedPrecipitation": {
+            "Harrison": {
+                "mapCutCoordinates": [3426, 1172]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [3426, 1172]
+            }
+        },
+        "Local_PrecipitationQpfForecast": {
+            "Harrison": {
+                "mapCutCoordinates": [3073, 1467]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [3073, 1467]
+            }
+        },
+        "Local_PalmerDroughtSeverity": {
+            "Harrison": {
+                "mapCutCoordinates": [3073, 1467]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [3073, 1467]
+            }
+        }
+    }
+}

@@ -7,13 +7,123 @@ and queries local database records.
 
 from __future__ import annotations
 
+from logging import config
+import math
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
+import json
 
 DB_PATH = Path("./LFRecord.db")
+
+with open('./pixelToLatLon.json') as f:
+    PIXEL_TO_LATLON = json.load(f)
+
+DOMESTIC_CALIBRATION = PIXEL_TO_LATLON["domestic"]
+WEATHERSCAN_CALIBRATION = PIXEL_TO_LATLON["weatherscan"]
+
+_LON_SCALE = 0.0018435216
+_LON_OFFSET = -132.836645
+_LAT_SCALE = 0.0000390509
+_LAT_OFFSET = 0.285417
+
+MAP_PRODUCT_SIZES: dict[str, tuple[int, int]] = {
+    "Radar_LocalDoppler": (1440, 822),
+    "NationalLdl_DopplerRadar": (1440, 821),
+    "Local_MetroDopplerRadar": (1440, 960),
+    "Local_MetroForecastMap": (1440, 960),
+    "Local_MetroObservationMap": (1440, 960),
+    "Local_RegionalDopplerRadar": (3456, 2304),
+    "Local_RegionalForecastMap": (5760, 3840),
+    "Local_RegionalObservationMap": (5760, 3840),
+}
+
+BASEMAP_TILES = {
+    "ne": {"width": 19718, "height": 10336, "x_min": 19703, "y_min": 0},
+    "nw": {"width": 19703, "height": 10336, "x_min": 0, "y_min": 0},
+    "se": {"width": 19718, "height": 10500, "x_min": 19703, "y_min": 10336},
+    "sw": {"width": 19703, "height": 10500, "x_min": 0, "y_min": 10336},
+}
+MERCATOR_MAX_X = 39421
+MERCATOR_MAX_Y = 20836
+
+def _lat_to_mercator_y(lat: float) -> float:
+    lat_rad = math.radians(lat)
+    return math.log(math.tan(math.pi / 4 + lat_rad / 2))
+
+
+def _mercator_y_to_lat(y: float) -> float:
+    return math.degrees(2 * math.atan(math.exp(y)) - math.pi / 2)
+
+
+def pixel_to_latlon(x: int, y: int) -> tuple[float, float]:
+
+    lon = x * _LON_SCALE + _LON_OFFSET
+    mercator_y = y * _LAT_SCALE + _LAT_OFFSET
+    lat = _mercator_y_to_lat(mercator_y)
+    return (lat, lon)
+
+
+def latlon_to_pixel(lat: float, lon: float) -> tuple[int, int]:
+
+    x = (lon - _LON_OFFSET) / _LON_SCALE
+    mercator_y = _lat_to_mercator_y(lat)
+    y = (mercator_y - _LAT_OFFSET) / _LAT_SCALE
+    return (round(x), round(y))
+
+
+def get_tiles_for_coordinate(x: int, y: int) -> list[str]:
+
+    tiles = []
+        
+    if x < 19703:
+        if y < 10336:
+            tiles.append("nw")
+        else:
+            tiles.append("sw")
+    else:
+        if y < 10336:
+            tiles.append("ne")
+        else:
+            tiles.append("se")
+    
+    return tiles
+
+
+def clamp_mapcut_coordinate(cut_x: int, cut_y: int, width: int, height: int) -> tuple[int, int]:
+
+    clamped_x = max(0, cut_x)
+    clamped_y = max(0, cut_y)
+    
+    if clamped_x + width > MERCATOR_MAX_X:
+        clamped_x = MERCATOR_MAX_X - width
+    
+    if clamped_y + height > MERCATOR_MAX_Y:
+        clamped_y = MERCATOR_MAX_Y - height
+    
+    return (clamped_x, clamped_y)
+
+
+def get_mapcut_coordinate(lat: float, lon: float, product_name: str) -> tuple[int, int]:
+
+    center = latlon_to_pixel(lat, lon)
+    size = MAP_PRODUCT_SIZES.get(product_name, (1440, 960))
+    cut_x = center[0] - size[0] // 2
+    cut_y = center[1] - size[1] // 2
+    
+    cut_x, cut_y = clamp_mapcut_coordinate(cut_x, cut_y, size[0], size[1])
+    
+    return (cut_x, cut_y)
+
+
+def get_all_mapcut_coordinates(lat: float, lon: float) -> dict[str, tuple[int, int]]:
+
+    return {
+        product: get_mapcut_coordinate(lat, lon, product)
+        for product in MAP_PRODUCT_SIZES
+    }
 
 print("=" * 60)
 print("IntelliStar Configuration Generator")
@@ -22,7 +132,6 @@ print("=" * 60)
 
 @contextmanager
 def get_db_connection(db_path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
-    """Context manager for database connections with automatic cleanup."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -30,17 +139,85 @@ def get_db_connection(db_path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
     finally:
         conn.close()
 
+def get_timezone_by_location_id(location_id: str) -> str | None:
+    tz = {
+        "CST": "CST6CDT",
+        "MST": "MST7MDT",
+        "PST": "PST8PDT",
+        "EST": "EST5EDT",
+        "AKST": "AKST9AKDT",
+        "HST": "HST10",
+    }
+    tz_canada = {
+        "AB": "America/Edmonton",
+        "BC": "America/Vancouver",
+        "MB": "America/Winnipeg",
+        "NB": "America/Moncton",
+        "NL": "America/St_Johns",
+        "NS": "America/Halifax",
+        "ON": "America/Toronto",
+        "PE": "America/Halifax",
+        "QC": "America/Montreal",
+        "SK": "America/Regina",
+        "YT": "America/Whitehorse",
+    }
+    tz_mexico = {
+        "AG": "America/Mexico_City",
+        "BC": "America/Tijuana",
+        "BS": "America/Mazatlan",
+        "CC": "America/Merida",
+        "CS": "America/Mexico_City",
+        "CH": "America/Chihuahua",
+        "CL": "America/Mexico_City",
+        "CM": "America/Mexico_City",
+        "DG": "America/Monterrey",
+        "GT": "America/Mexico_City",
+        "GR": "America/Mexico_City",
+        "HG": "America/Mexico_City",
+        "JA": "America/Mexico_City",
+        "EM": "America/Mexico_City",
+        "MI": "America/Mexico_City",
+        "MO": "America/Mexico_City",
+        "NA": "America/Mazatlan",
+        "NL": "America/Monterrey",
+        "OA": "America/Mexico_City",
+        "PU": "America/Mexico_City",
+        "QT": "America/Mexico_City",
+        "QR": "America/Cancun",
+        "SL": "America/Mexico_City",
+        "SI": "America/Mazatlan",
+        "SO": "America/Hermosillo",
+        "TB": "America/Mexico_City",
+        "TM": "America/Monterrey",
+        "TL": "America/Mexico_City",
+        "VE": "America/Mexico_City",
+        "YU": "America/Merida",
+        "ZA": "America/Mexico_City",
+    }
+
+
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "SELECT * FROM LFRecord WHERE locId = ?",
+            (location_id,)
+        )
+        init_fetch = cursor.fetchone()
+
+    if init_fetch is not None:
+        country_code = init_fetch["cntryCd"]
+        if country_code == "US":
+            return tz.get(init_fetch["stCd"], "CST")
+        if country_code == "CA":
+            return tz_canada.get(init_fetch["stCd"], "America/Regina")
+        if country_code == "MX":
+            return tz_mexico.get(init_fetch["stCd"], "America/Mexico_City")
+        return "CST6CDT"
+
+    timezone = row["timeZone"]
+    print(f"Found timezone: {timezone}")
+    return timezone
 
 def get_record_by_location_id(location_id: str) -> dict | None:
-    """
-    Retrieve a record from LFRecord.db by location ID.
-
-    Args:
-        location_id: The location ID to search for.
-
-    Returns:
-        Dictionary of record data, or None if not found.
-    """
     with get_db_connection() as conn:
         cursor = conn.execute(
             "SELECT * FROM LFRecord WHERE locId = ?",
@@ -57,15 +234,7 @@ def get_record_by_location_id(location_id: str) -> dict | None:
 
 
 def search_records_by_name(search_term: str) -> list[dict]:
-    """
-    Search LFRecord.db for records matching a name.
 
-    Args:
-        search_term: The name to search for (uses LIKE matching).
-
-    Returns:
-        List of matching records as dictionaries.
-    """
     with get_db_connection() as conn:
         cursor = conn.execute(
             "SELECT * FROM LFRecord WHERE prsntNm LIKE ? ORDER BY prsntNm LIMIT 20",
@@ -76,16 +245,61 @@ def search_records_by_name(search_term: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def search_and_select_location(prompt: str, allow_skip: bool = False, show_coords: bool = False) -> dict | None:
+
+    location_name = input(prompt).strip()
+    
+    if not location_name:
+        if allow_skip:
+            print("    Skipped")
+        else:
+            print("No location name provided")
+        return None
+    
+    matches = search_records_by_name(location_name)
+    
+    if not matches:
+        print(f"    No results found for '{location_name}' in database")
+        return None
+    
+    if len(matches) == 1:
+        record = matches[0]
+        loc_id = record.get('locId', '')[:8] if record.get('locId') else ''
+        print(f"    Found: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {loc_id})")
+        if show_coords:
+            print(f"    Coordinates: {record.get('lat', 'N/A')}, {record.get('long', 'N/A')}")
+        return record
+    
+    print(f"    Multiple matches found ({len(matches)}):")
+    print("    Make sure to select locIds like 'CNST0000' for the best data consistency!")
+    for idx, record in enumerate(matches, 1):
+        loc_id = record.get('locId', '')[:8] if record.get('locId') else ''
+        print(f"      [{idx}] {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {loc_id})")
+    
+    skip_text = ", or 'skip'" if allow_skip else ""
+    while True:
+        selection = input(f"    Select (1-{len(matches)}{skip_text}): ").strip()
+        
+        if allow_skip and selection.lower() == 'skip':
+            print("    Skipped")
+            return None
+        
+        try:
+            sel_idx = int(selection) - 1
+            if 0 <= sel_idx < len(matches):
+                record = matches[sel_idx]
+                print(f"    Selected: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')}")
+                if show_coords:
+                    print(f"    Coordinates: {record.get('lat', 'N/A')}, {record.get('long', 'N/A')}")
+                return record
+            else:
+                print(f"    Invalid selection. Enter 1-{len(matches)}")
+        except ValueError:
+            print(f"    Invalid input. Enter a number")
+
+
 def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
-    """
-    Prompt user for nearby location names, searching LFRecord database directly.
 
-    Args:
-        max_nearby: Maximum number of nearby locations to prompt for.
-
-    Returns:
-        List of matching database records as dictionaries.
-    """
     nearby_locations = []
     
     print(f"\nEnter up to {max_nearby} nearby locations (press Enter to skip, 'back' to go back):")
@@ -95,7 +309,7 @@ def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
         location_name = input(f"  Nearby location {i + 1}: ").strip()
         
         if not location_name:
-            print(f"    Skipped")
+            print("    Skipped")
             i += 1
             continue
         
@@ -105,10 +319,9 @@ def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
                 i -= 1
                 print(f"    Removed: {removed.get('prsntNm', 'Unknown')}")
             else:
-                print(f"    Nothing to go back to")
+                print("    Nothing to go back to")
             continue
         
-        # Search the database directly
         matches = search_records_by_name(location_name)
         
         if not matches:
@@ -116,14 +329,13 @@ def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
             continue
         
         if len(matches) == 1:
-            # Single match - use it directly
             record = matches[0]
             nearby_locations.append(record)
             print(f"    Found: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {record.get('locId', '')[:8]})")
             i += 1
         else:
-            # Multiple matches - ask user to select
             print(f"    Multiple matches found ({len(matches)}):")
+            print("    Make sure to select locIds like 'CNST0000' for the best data consistency!")
             for idx, record in enumerate(matches, 1):
                 loc_id = record.get('locId', '')[:8] if record.get('locId') else ''
                 print(f"      [{idx}] {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {loc_id})")
@@ -132,7 +344,7 @@ def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
                 selection = input(f"    Select (1-{len(matches)}, or 'skip'): ").strip()
                 
                 if selection.lower() == 'skip':
-                    print(f"    Skipped")
+                    print("    Skipped")
                     break
                 
                 try:
@@ -152,48 +364,7 @@ def prompt_for_nearby_locations(max_nearby: int = 7) -> list[dict]:
 
 
 def prompt_for_location() -> dict | None:
-    """Prompt user for location and return database record, searching LFRecord database directly."""
-    location_name = input("Enter the location name: ").strip()
-    
-    if not location_name:
-        print("No location name provided")
-        return None
-    
-    # Search the database directly (same as nearby locations)
-    matches = search_records_by_name(location_name)
-    
-    if not matches:
-        print(f"No results found for '{location_name}' in database")
-        return None
-    
-    if len(matches) == 1:
-        # Single match - use it directly
-        record = matches[0]
-        loc_id = record.get('locId', '')[:8] if record.get('locId') else ''
-        print(f"Found: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {loc_id})")
-        print(f"  Coordinates: {record.get('lat', 'N/A')}, {record.get('long', 'N/A')}")
-        return record
-    else:
-        # Multiple matches - ask user to select
-        print(f"Multiple matches found ({len(matches)}):")
-        for idx, record in enumerate(matches, 1):
-            loc_id = record.get('locId', '')[:8] if record.get('locId') else ''
-            print(f"  [{idx}] {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')} (ID: {loc_id})")
-        
-        while True:
-            selection = input(f"Select (1-{len(matches)}): ").strip()
-            
-            try:
-                sel_idx = int(selection) - 1
-                if 0 <= sel_idx < len(matches):
-                    record = matches[sel_idx]
-                    print(f"Selected: {record.get('prsntNm', '')}, {record.get('stCd', '')} {record.get('cntryCd', '')}")
-                    print(f"  Coordinates: {record.get('lat', 'N/A')}, {record.get('long', 'N/A')}")
-                    return record
-                else:
-                    print(f"Invalid selection. Enter 1-{len(matches)}")
-            except ValueError:
-                print(f"Invalid input. Enter a number")
+    return search_and_select_location("Enter the location name: ", allow_skip=False, show_coords=True)
 
 @dataclass
 class LocationRecord:
@@ -215,8 +386,6 @@ class LocationRecord:
 
     @classmethod
     def from_db_record(cls, record: dict, name: str = "") -> "LocationRecord":
-        """Parse a database record into a LocationRecord."""
-
         teccis = []
         for key in ("primTecci",):
             if record.get(key):
@@ -252,11 +421,9 @@ class LocationRecord:
             lon=lon,
         )
 
-
 def quote_list(items: list[str]) -> str:
-    """Format list items as quoted strings."""
-    return ", ".join(f"'{item}'" for item in items if item)
 
+    return ", ".join(f"'{item}'" for item in items if item)
 
 @dataclass
 class AggregatedConfig:
@@ -310,9 +477,285 @@ class AggregatedConfig:
             self.lon = record.lon
 
 
-def compile_i1_interest_list(config: AggregatedConfig) -> str:
+def get_cityticker_travel_cities(state_code: str, country_code: str) -> str:
+    """Get CityTicker travel cities based on region.
     
-    output_interest_list = f"""wxdata.setInterestList('airportId','1',[{quote_list(config.airport_ids) if config.airport_ids else ''}])
+    Maps states/provinces to regions and returns appropriate travel cities.
+    """
+    # Define region mappings
+    southeast_us = ['FL', 'GA', 'AL', 'MS', 'LA', 'SC', 'NC', 'TN', 'KY', 'VA', 'WV', 'AR']
+    northeast_us = ['NY', 'NJ', 'PA', 'CT', 'MA', 'RI', 'NH', 'VT', 'ME', 'DE', 'MD', 'DC']
+    midwest_us = ['OH', 'MI', 'IN', 'IL', 'WI', 'MN', 'IA', 'MO', 'ND', 'SD', 'NE', 'KS']
+    southwest_us = ['TX', 'OK', 'NM', 'AZ']
+    california = ['CA']
+    northwest_us = ['WA', 'OR', 'ID', 'MT', 'WY']
+    rocky_mountain = ['CO', 'UT', 'NV']
+    
+    # Canadian regions
+    maritimes = ['NS', 'NB', 'PE', 'NL']
+    quebec = ['QC']
+    ontario = ['ON']
+    prairies = ['MB', 'SK', 'AB']
+    british_columbia = ['BC']
+    territories = ['YT', 'NT', 'NU']
+    
+    if country_code == "CA":
+        if state_code in maritimes:
+            return """d = twc.Data()
+d.obsStation = ['T71437008','CYUL','T71300001','T71398004','T71705002','T71609000',]
+d.locName = ['Toronto','Montreal','Ottawa','Halifax','Moncton','Saint John',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Toronto','Montreal','Ottawa','Halifax','Moncton','Saint John',]
+d.coopId = ['71624000','71627000','71628000','71395000','71706000','71609000',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in british_columbia:
+            return """d = twc.Data()
+d.obsStation = ['CYVR','T71799002','CYXX','CYLW','T71896004','T71887000',]
+d.locName = ['Vancouver','Victoria','Abbotsford','Kelowna','Prince George','Kamloops',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Vancouver','Victoria','Abbotsford','Kelowna','Prince George','Kamloops',]
+d.coopId = ['71892000','71799000','71108000','71203000','71896000','71887000',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in prairies:
+            return """d = twc.Data()
+d.obsStation = ['CYYC','T71123000','T71513001','T71863000','T71579003','T71251001',]
+d.locName = ['Calgary','Edmonton','Saskatoon','Regina','Winnipeg','Lethbridge',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Calgary','Edmonton','Saskatoon','Regina','Winnipeg','Lethbridge',]
+d.coopId = ['71877000','71123000','71866000','71863000','71852000','71874000',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in quebec:
+            return """d = twc.Data()
+d.obsStation = ['CYUL','T71578001','CYVO','CYHU','CYMX','CYUY',]
+d.locName = ['Montreal','Quebec City','Val-d\\'Or','St. Hubert','Mirabel','Rouyn',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Montreal','Quebec City','Val-d\\'Or','St. Hubert','Mirabel','Rouyn',]
+d.coopId = ['71627000','71714000','71725000','71371000','71626000','71733000',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        else:
+            # Default Canada (Ontario and territories)
+            return """d = twc.Data()
+d.obsStation = ['T71437008','CYUL','CYVR','T71300001','CYYC','T71579003',]
+d.locName = ['Toronto','Montreal','Vancouver','Ottawa','Calgary','Winnipeg',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Toronto','Montreal','Vancouver','Ottawa','Calgary','Winnipeg',]
+d.coopId = ['71624000','71627000','71892000','71628000','71877000','71852000',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+    else:
+        # US regions
+        if state_code in southeast_us:
+            return """d = twc.Data()
+d.obsStation = ['T72219029','T72202000','T72205000','T72327008','T72314004','T72231015',]
+d.locName = ['Atlanta','Miami','Orlando','Nashville','Charlotte','New Orleans',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Atlanta','Miami','Orlando','Nashville','Charlotte','New Orleans',]
+d.coopId = ['72219013','72202012','72205012','72327013','72314013','72231012',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in northeast_us:
+            return """d = twc.Data()
+d.obsStation = ['T72503193','T72509060','T72408054','T72405034','T72406000','T72507009',]
+d.locName = ['New York','Boston','Philadelphia','Washington','Baltimore','Providence',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['New York','Boston','Philadelphia','Washington','Baltimore','Providence',]
+d.coopId = ['72503094','72509014','72408013','72405093','72406093','72507014',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in california:
+            return """d = twc.Data()
+d.obsStation = ['T72295000','T72494028','T72290012','T74509014','T72494029','T72483024',]
+d.locName = ['Los Angeles','San Francisco','San Diego','San Jose','Oakland','Sacramento',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Los Angeles','San Francisco','San Diego','San Jose','Oakland','Sacramento',]
+d.coopId = ['72295000','72294093','72290023','72293090','72294090','72283093',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in northwest_us:
+            return """d = twc.Data()
+d.obsStation = ['T72793000','T72698008','T72681000','T72785004','T72772024','T72773011',]
+d.locName = ['Seattle','Portland','Boise','Spokane','Bozeman','Missoula',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Seattle','Portland','Boise','Spokane','Bozeman','Missoula',]
+d.coopId = ['72793024','72698024','72681024','72785024','72677024','72773024',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in midwest_us:
+            return """d = twc.Data()
+d.obsStation = ['T72530000','T72537001','T72658005','T72524092','T72438000','T72446003',]
+d.locName = ['Chicago','Detroit','Minneapolis','Cleveland','Indianapolis','Kansas City',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Chicago','Detroit','Minneapolis','Cleveland','Indianapolis','Kansas City',]
+d.coopId = ['72530094','72537094','72658014','72524094','72438093','72446093',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in southwest_us:
+            return """d = twc.Data()
+d.obsStation = ['T72259000','T72243023','T72278000','T72253000','T72365000','T72270000',]
+d.locName = ['Dallas','Houston','Phoenix','San Antonio','Albuquerque','El Paso',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Dallas','Houston','Phoenix','San Antonio','Albuquerque','El Paso',]
+d.coopId = ['72258053','72243012','72278023','72253012','72365023','72270023',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif state_code in rocky_mountain:
+            return """d = twc.Data()
+d.obsStation = ['T72469009','T72572028','T72386000','T72466000','T72476000','T72464000',]
+d.locName = ['Denver','Salt Lake City','Las Vegas','Colorado Springs','Grand Junction','Pueblo',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Denver','Salt Lake City','Las Vegas','Colorado Springs','Grand Junction','Pueblo',]
+d.coopId = ['72565003','72572024','72386023','72566093','72576093','72564003',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif country_code == "US":
+            # Default US (general national cities)
+            return """d = twc.Data()
+d.obsStation = ['T72503193','T72295000','T72530000','T72259000','T72469009','T72219029',]
+d.locName = ['New York','Los Angeles','Chicago','Dallas','Denver','Atlanta',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['New York','Los Angeles','Chicago','Dallas','Denver','Atlanta',]
+d.coopId = ['72503094','72295000','72530094','72258053','72565003','72219013',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+        elif country_code == "MX":
+            # Mexico travel cities (only Monterrey has TECCI)
+            return """d = twc.Data()
+d.obsStation = ['MMMX','MMGL','T76393000','MMTJ','MMUN','MMPR',]
+d.locName = ['Mexico City','Guadalajara','Monterrey','Tijuana','Cancun','Puerto Vallarta',]
+dsm.set('Config.1.CityTicker_TravelCitiesCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Mexico City','Guadalajara','Monterrey','Tijuana','Cancun','Puerto Vallarta',]
+d.coopId = ['76679000','76612000','76394000','76188000','76595000','76654000',]
+dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
+
+
+def get_cityticker_obs_stations(state_code: str, country_code: str) -> list[str]:
+    """Get CityTicker obsStation IDs for interest list based on region.
+    
+    Returns a list of obsStation IDs for the travel cities.
+    Prioritizes TECCI format (T + coopId) where available from LFRecord.db,
+    falls back to ICAO airport codes when no TECCI exists.
+    """
+    # Define region mappings (same as get_cityticker_travel_cities)
+    southeast_us = ['FL', 'GA', 'AL', 'MS', 'LA', 'SC', 'NC', 'TN', 'KY', 'VA', 'WV', 'AR']
+    northeast_us = ['NY', 'NJ', 'PA', 'CT', 'MA', 'RI', 'NH', 'VT', 'ME', 'DE', 'MD', 'DC']
+    midwest_us = ['OH', 'MI', 'IN', 'IL', 'WI', 'MN', 'IA', 'MO', 'ND', 'SD', 'NE', 'KS']
+    southwest_us = ['TX', 'OK', 'NM', 'AZ']
+    california = ['CA']
+    northwest_us = ['WA', 'OR', 'ID', 'MT', 'WY']
+    rocky_mountain = ['CO', 'UT', 'NV']
+    
+    # Canadian regions
+    maritimes = ['NS', 'NB', 'PE', 'NL']
+    quebec = ['QC']
+    ontario = ['ON']
+    prairies = ['MB', 'SK', 'AB']
+    british_columbia = ['BC']
+    territories = ['YT', 'NT', 'NU']
+    
+    if country_code == "CA":
+        if state_code in maritimes:
+            # Toronto, Montreal, Ottawa, Halifax, Moncton, Saint John - TECCIs from LFRecord
+            return ['T71437008', 'CYUL', 'T71300001', 'T71398004', 'T71705002', 'T71609000']
+        elif state_code in quebec:
+            # Montreal, Quebec City, Val-d'Or, St. Hubert, Mirabel, Rouyn
+            return ['CYUL', 'T71578001', 'CYVO', 'CYHU', 'CYMX', 'CYUY']
+        elif state_code in ontario:
+            # Toronto, Ottawa, Hamilton, London, Thunder Bay, Sudbury
+            return ['T71437008', 'T71300001', 'CYHM', 'CYXU', 'CYQT', 'CYSB']
+        elif state_code in prairies:
+            # Calgary, Edmonton, Saskatoon, Regina, Winnipeg, Lethbridge
+            return ['CYYC', 'T71123000', 'T71513001', 'T71863000', 'T71579003', 'T71251001']
+        elif state_code in british_columbia:
+            # Vancouver, Victoria, Abbotsford, Kelowna, Prince George, Kamloops
+            return ['CYVR', 'T71799002', 'CYXX', 'CYLW', 'T71896004', 'T71887000']
+        elif state_code in territories:
+            # Whitehorse, Yellowknife, Iqaluit, Dawson City, Inuvik, Norman Wells
+            return ['CYXY', 'CYZF', 'CYFB', 'CYDA', 'CYEV', 'CYVQ']
+        else:
+            # Default Canadian cities - Toronto, Montreal, Vancouver, Ottawa, Calgary, Winnipeg
+            return ['T71437008', 'CYUL', 'CYVR', 'T71300001', 'CYYC', 'T71579003']
+    elif country_code == "MX":
+        # Mexico City, Guadalajara, Monterrey, Tijuana, Cancun, Puerto Vallarta
+        # Only Monterrey has TECCI
+        return ['MMMX', 'MMGL', 'T76393000', 'MMTJ', 'MMUN', 'MMPR']
+    else:
+        # US regions - TECCIs from LFRecord where available
+        if state_code in southeast_us:
+            # Atlanta, Miami, Orlando, Nashville, Charlotte, New Orleans
+            return ['T72219029', 'T72202000', 'T72205000', 'T72327008', 'T72314004', 'T72231015']
+        elif state_code in northeast_us:
+            # New York, Boston, Philadelphia, Washington, Baltimore, Providence
+            return ['T72503193', 'T72509060', 'T72408054', 'T72405034', 'T72406000', 'T72507009']
+        elif state_code in midwest_us:
+            # Chicago, Detroit, Minneapolis, Cleveland, Indianapolis, Kansas City
+            return ['T72530000', 'T72537001', 'T72658005', 'T72524092', 'T72438000', 'T72446003']
+        elif state_code in southwest_us:
+            # Dallas, Houston, Phoenix, San Antonio, Albuquerque, El Paso
+            return ['T72259000', 'T72243023', 'T72278000', 'T72253000', 'T72365000', 'T72270000']
+        elif state_code in california:
+            # Los Angeles, San Francisco, San Diego, San Jose, Oakland, Sacramento
+            return ['T72295000', 'T72494028', 'T72290012', 'T74509014', 'T72494029', 'T72483024']
+        elif state_code in northwest_us:
+            # Seattle, Portland, Boise, Spokane, Bozeman, Missoula
+            return ['T72793000', 'T72698008', 'T72681000', 'T72785004', 'T72772024', 'T72773011']
+        elif state_code in rocky_mountain:
+            # Denver, Salt Lake City, Las Vegas, Colorado Springs, Grand Junction, Pueblo
+            return ['T72469009', 'T72572028', 'T72386000', 'T72466000', 'T72476000', 'T72464000']
+        else:
+            # Default US (general national cities) - NYC, LA, Chicago, Dallas, Denver, Atlanta
+            return ['T72503193', 'T72295000', 'T72530000', 'T72259000', 'T72469009', 'T72219029']
+
+
+def compile_i1_interest_list(config: AggregatedConfig, system_type: str = "domestic") -> str:
+    
+    if system_type == "weatherscan":
+        # International coop IDs for Canada and Mexico forecasts (static)
+        intl_coop_ids = [
+            # Canada
+            '71182000', '71627001', '71852000', '71879001', '71892001', '71913000', '71936000', '71966000',
+            # Mexico
+            '76255000', '76393000', '76405000', '76595000', '76679001',
+        ]
+        
+        # CityTicker obsStation IDs based on region
+        cityticker_obs = get_cityticker_obs_stations(config.state_code, config.country_code)
+        
+        # Combine all coop IDs
+        all_coop_ids = list(config.coop_ids) + intl_coop_ids
+        # Combine all obsStation IDs
+        all_obs_ids = list(config.tecci_ids) + cityticker_obs
+        
+        output_interest_list = f"""wxdata.setInterestList('airportId','1',[{quote_list(config.airport_ids) if config.airport_ids else ''}])
+wxdata.setInterestList('coopId','1',[{quote_list(all_coop_ids)}])
+wxdata.setInterestList('pollenId','1',[])
+wxdata.setInterestList('obsStation','1',[{quote_list(all_obs_ids)}])
+wxdata.setInterestList('metroId','1',[])
+wxdata.setInterestList('climId','1',[{quote_list(config.climate_ids)}])
+wxdata.setInterestList('zone','1',[{quote_list(config.zone_ids)}])
+wxdata.setInterestList('aq','1',[])
+wxdata.setInterestList('skiId','1',[])
+wxdata.setInterestList('county','1',[{quote_list(config.county_ids)}])"""
+    else:
+        output_interest_list = f"""wxdata.setInterestList('airportId','1',[{quote_list(config.airport_ids) if config.airport_ids else ''}])
 wxdata.setInterestList('coopId','1',[{quote_list(config.coop_ids)}])
 wxdata.setInterestList('indexId','1',[''])
 #wxdata.setInterestList('pollenId','1',[])
@@ -325,9 +768,80 @@ wxdata.setInterestList('county','1',[{quote_list(config.county_ids)}])"""
     
     return output_interest_list
 
-def compile_i1_currentconditions(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
+def compile_i1_currentconditions(config: AggregatedConfig, all_records: list[LocationRecord], system_type: str = "domestic") -> str:
     loc_name = config.name
-    output_current_conditions = f"""d = twc.Data()
+    loc_names = [record.name for record in all_records[:2]]
+    
+    if system_type == "weatherscan":
+        # Get travel cities based on country
+        travel_cities_output = get_cityticker_travel_cities(config.state_code, config.country_code)
+        
+        # Weatherscan uses different current conditions products
+        output_current_conditions = f"""d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.locName = [{quote_list(loc_names)}]
+d.elementDurationShort = 6
+dsm.set('Config.1.Cc_ShortCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.locName = [{quote_list(loc_names)}]
+d.elementDurationLong = 6
+dsm.set('Config.1.Cc_LongCurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.locName = [{quote_list(loc_names)}]
+dsm.set('Config.1.Core1.0.Local_CurrentConditions.0', d, 0, 1)
+dsm.set('Config.1.Core2.0.Local_CurrentConditions.0', d, 0, 1)
+dsm.set('Config.1.Core3.0.Local_CurrentConditions.0', d, 0, 1)
+dsm.set('Config.1.Core4.0.Local_CurrentConditions.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1A.0.Local_CurrentConditions.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1B.0.Local_CurrentConditions.0', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[:4])}]
+d.locName = [{quote_list([record.name for record in all_records[:4]])}]
+dsm.set('Config.1.SevereCore1A.0.Local_LocalObservations.0', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[4:8]) if len(config.tecci_ids) > 4 else quote_list(config.tecci_ids[:4])}]
+d.locName = [{quote_list([record.name for record in all_records[4:8]]) if len(all_records) > 4 else quote_list([record.name for record in all_records[:4]])}]
+dsm.set('Config.1.SevereCore1A.0.Local_LocalObservations.1', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[:4])}]
+d.locName = [{quote_list([record.name for record in all_records[:4]])}]
+dsm.set('Config.1.Core1.0.Local_LocalObservations.0', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[4:8]) if len(config.tecci_ids) > 4 else quote_list(config.tecci_ids[:4])}]
+d.locName = [{quote_list([record.name for record in all_records[4:8]]) if len(all_records) > 4 else quote_list([record.name for record in all_records[:4]])}]
+dsm.set('Config.1.Core1.0.Local_LocalObservations.1', d, 0, 1)
+#
+d = twc.Data()
+d.obsStation = [{quote_list(config.tecci_ids[:10])}]
+d.locName = [{quote_list([record.name for record in all_records[:10]])}]
+dsm.set('Config.1.CityTicker_LocalCitiesCurrentConditions.0', d, 0, 1)
+#
+""" + get_cityticker_travel_cities(config.state_code, config.country_code) + f"""
+#
+d = twc.Data()
+d.obsStation = '{config.tecci_ids[0] if config.tecci_ids else ""}'
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Health.0.Local_UltravioletIndex.0', d, 0, 1)
+#
+d = twc.Data()
+d.climId = '{config.climate_ids[0] if config.climate_ids else ""}'
+d.latitude = {config.lat}
+d.longitude = {config.lon}
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Core1.0.Local_Almanac.0', d, 0, 1)"""
+    else:
+        # Domestic IntelliStar
+        output_current_conditions = f"""d = twc.Data()
 d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
 d.locName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
 d.elementDuration = 6
@@ -439,9 +953,106 @@ d.activeVocalCue = 1
 dsm.set('Config.1.Local_RegionalDopplerRadar', d, 0, 1)"""
     return output_current_conditions
 
-def compile_i1_forecast(config: AggregatedConfig) -> str:
+def compile_i1_forecast(config: AggregatedConfig, system_type: str = "domestic") -> str:
     loc_name = config.name
-    output_forecast = f"""d = twc.Data()
+    
+    if system_type == "weatherscan":
+        # Weatherscan forecast products
+        output_forecast = f"""d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Fcst_ExtendedForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Fcst_TextForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Fcst_DaypartForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Core1.0.Local_ExtendedForecast.0', d, 0, 1)
+dsm.set('Config.1.Core2.0.Local_ExtendedForecast.0', d, 0, 1)
+dsm.set('Config.1.Core4.0.Local_ExtendedForecast.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1A.0.Local_ExtendedForecast.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1B.0.Local_ExtendedForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Core2.0.Local_DaypartForecast.0', d, 0, 1)
+dsm.set('Config.1.Core4.0.Local_DaypartForecast.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1B.0.Local_DaypartForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.minPageDuration = 8
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+d.maxPageDuration = 14
+dsm.set('Config.1.Core1.0.Local_TextForecast.0', d, 0, 1)
+dsm.set('Config.1.Core3.0.Local_TextForecast.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1A.0.Local_TextForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name} Area'
+d.zone = '{config.zone_ids[0] if config.zone_ids else ""}'
+dsm.set('Config.1.Core1.0.Local_WeatherBulletin.0', d, 0, 1)
+dsm.set('Config.1.Core2.0.Local_WeatherBulletin.0', d, 0, 1)
+dsm.set('Config.1.Core3.0.Local_WeatherBulletin.0', d, 0, 1)
+dsm.set('Config.1.Core4.0.Local_WeatherBulletin.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1A.0.Local_WeatherBulletin.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1B.0.Local_WeatherBulletin.0', d, 0, 1)
+dsm.set('Config.1.SevereCore2.0.Local_WeatherBulletin.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '/ Weatherscan'
+dsm.set('Config.1.SevereCore1A.0.Local_SevereWeatherMessage.0', d, 0, 1)
+dsm.set('Config.1.SevereCore1B.0.Local_SevereWeatherMessage.0', d, 0, 1)
+dsm.set('Config.1.SevereCore2.0.Local_SevereWeatherMessage.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Health.0.Local_HealthForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Health.0.Local_OutdoorActivityForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
+dsm.set('Config.1.Garden.0.Local_GardeningForecast.0', d, 0, 1)
+#
+d = twc.Data()
+d.summerFlag = 1
+dsm.set('Config.1.Health.0.Local_SunSafetyFacts.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Toronto','London','Paris',]
+d.coopId = ['71624000','03772000','07149000',]
+dsm.set('Config.1.International.0.Local_InternationalDestinations.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Cancun','Tokyo','Sydney',]
+d.coopId = ['76595000','47671000','94767000',]
+dsm.set('Config.1.International.0.Local_InternationalDestinations.1', d, 0, 1)
+#
+d = twc.Data()
+d.locName = ['Berlin','Rome','Hong Kong',]
+d.coopId = ['10384000','16239000','45005000',]
+dsm.set('Config.1.International.0.Local_InternationalDestinations.2', d, 0, 1)
+#
+"""
+    else:
+        # Domestic IntelliStar forecast products
+        output_forecast = f"""d = twc.Data()
 d.locName = '{loc_name}'
 d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
 dsm.set('Config.1.Fcst_ExtendedForecast', d, 0, 1)
@@ -507,12 +1118,66 @@ dsm.set('Config.1.Ldl_SummaryForecast', d, 0, 1)
 """
     return output_forecast
 
-def compile_i1_metadata(config: AggregatedConfig) -> str:
+def compile_i1_metadata(config: AggregatedConfig, system_type: str = "domestic") -> str:
     """Generate metadata configuration settings."""
     county_list = [(cid, cname) for cid, cname in config.county_names.items()]
     county_list_str = str(county_list) if county_list else "[]"
+
+    import random
+
+    random_star_id = random.randint(100000, 999999)
+
+    random_cable_names = [
+        "I HATE COMCAST CORPORATION",
+        "NOT MARICOM",
+        "FOREST CLEARING COMMUNICATIONS",
+        "WHO CARES ABOUT THIS THEY ARE ALL OWNED BY ONE BIG CORPORATION ANYWAYS",
+        "OPEN YOUR MIND. OPEN YOUR EYES",
+        "STEVEN HERE",
+        "FEMBOYTELECOM",
+        "GENERICABLE INC.",
+        "WHOLLY OWNED BY MIST WEATHER MEDIA",
+        "ZESTNETTV",
+        "ZACHNET TV",
+        "The67TV",
+        "HI MY NAME IS AUSTIN AND IM A PEDOPHILE, INC",
+        "GENERICABLE SUCKS",
+        "I HATE ROGERS XFINITY",
+        "DECENTRALIZE OUR TELECOMMUNICATIONS",
+        "meowwww",
+    ]
+
+    random_cable_name = random.choice(random_cable_names)
     
-    output_metadata = f"""dsm.set('Config.1.countyNameList',{county_list_str}, 0)
+    if system_type == "weatherscan":
+        output_metadata = f"""dsm.set('dmaCode','None', 0)
+dsm.set('headendName','WXS - {config.name.upper()} - WXS', 0)
+dsm.set('cableSystemName','{random_cable_name},', 0)
+dsm.set('onAirName','{random_cable_name},', 0)
+dsm.set('msoName','{random_cable_name}', 0)
+dsm.set('secondaryObsStation','{config.tecci_ids[1] if len(config.tecci_ids) > 1 else config.tecci_ids[0] if config.tecci_ids else ""}', 0)
+dsm.set('primaryClimoStation','{config.climate_ids[0] if config.climate_ids else ""}', 0)
+dsm.set('stateCode','{config.state_code}', 0)
+dsm.set('primaryCoopId','{config.coop_ids[0] if config.coop_ids else ""}', 0)
+dsm.set('primarylat',{config.lat}, 0)
+dsm.set('primaryCounty','{config.county_ids[0] if config.county_ids else ""}', 0)
+dsm.set('primaryObsStation','{config.tecci_ids[0] if config.tecci_ids else ""}', 0)
+dsm.set('hasTraffic',0, 0)
+dsm.set('Config.1.Clock','scmt.clock', 0)
+dsm.set('primaryLon',{config.lon}, 0)
+dsm.set('primaryForecastName','{config.name}', 0)
+dsm.set('primaryZone','{config.zone_ids[0] if config.zone_ids else ""}', 0)
+dsm.set('Config.1.SevereClock','scmt_severe.clock', 0)
+dsm.set('countryCode','{config.country_code}', 0)
+dsm.set('headendId','{random_star_id}', 0)
+"""
+
+    else:
+        output_metadata = f"""dsm.set('Config.1.countyNameList',{county_list_str}, 0)
+dsm.set('headendName','DOM - {config.name.upper()} - DOM', 0)
+dsm.set('cableSystemName','{random_cable_name},', 0)
+dsm.set('onAirName','{random_cable_name},', 0)
+dsm.set('msoName','{random_cable_name}', 0)
 dsm.set('dmaCode','None', 0)
 dsm.set('secondaryObsStation','{config.tecci_ids[1] if len(config.tecci_ids) > 1 else config.tecci_ids[0] if config.tecci_ids else ""}', 0)
 dsm.set('primaryClimoStation','{config.climate_ids[0] if config.climate_ids else ""}', 0)
@@ -535,6 +1200,8 @@ dsm.set('primaryForecastName','{config.name}', 0)
 dsm.set('primaryZone','{config.zone_ids[0] if config.zone_ids else ""}', 0)
 dsm.set('climoRegion','3', 0)
 dsm.set('Config.1.SevereClock','scmt_severe.clock', 0)
+dsm.set('headendId','{random_star_id}', 0)
+
 dsm.set('countryCode','{config.country_code}', 0)"""
     return output_metadata
 
@@ -581,7 +1248,7 @@ def compile_i1_travel_forecast(config: AggregatedConfig, all_records: list[Locat
     if len(all_records) < 2:
         return ""
     
-    travel_records = all_records[1:4]  # Use 2nd through 4th records for travel
+    travel_records = all_records[1:4]
     loc_names = [r.name for r in travel_records]
     coop_ids = [r.coop_id for r in travel_records if r.coop_id]
     
@@ -683,7 +1350,198 @@ d = [
 ]
 dsm.set('Config.1.nonImageMaps', d, 0)"""
 
-def compile_full_config(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
+
+def compile_wxscan_packages(config: AggregatedConfig) -> str:
+    """Generate weatherscan package definitions."""
+    loc_name = config.name
+    output = f"""#
+scmtRemove('Config.1.Ski.0')
+d = twc.Data()
+d.bkgImage = 'ski_bg'
+d.packageTitle = 'Ski & Snow'
+d.packageFlavor = 1
+d.shortPackageTitle = 'SKI'
+dsm.set('Config.1.Ski.0', d, 0, 1)
+scmtRemove('Config.1.Garden.0')
+d = twc.Data()
+d.bkgImage = 'garden_bg'
+d.packageTitle = 'Garden'
+d.packageFlavor = 1
+d.shortPackageTitle = 'GARDEN'
+dsm.set('Config.1.Garden.0', d, 0, 1)
+scmtRemove('Config.1.SevereCore1B.0')
+d = twc.Data()
+d.bkgImage = 'severe_core_bg'
+d.packageTitle = 'Your Local Forecast'
+d.packageFlavor = 1
+d.shortPackageTitle = 'YOUR LOCAL FORECAST'
+dsm.set('Config.1.SevereCore1B.0', d, 0, 1)
+scmtRemove('Config.1.SevereCore1A.0')
+d = twc.Data()
+d.bkgImage = 'severe_core_bg'
+d.packageTitle = 'Your Local Forecast'
+d.packageFlavor = 1
+d.shortPackageTitle = 'YOUR LOCAL FORECAST'
+dsm.set('Config.1.SevereCore1A.0', d, 0, 1)
+scmtRemove('Config.1.International.0')
+d = twc.Data()
+d.bkgImage = 'international_bg'
+d.packageTitle = 'International Forecast'
+d.packageFlavor = 3
+d.shortPackageTitle = 'INTERNATIONAL'
+dsm.set('Config.1.International.0', d, 0, 1)
+scmtRemove('Config.1.SevereCore2.0')
+d = twc.Data()
+d.bkgImage = 'severe_core_bg'
+d.packageTitle = 'Your Local Forecast'
+d.packageFlavor = 1
+d.shortPackageTitle = 'YOUR LOCAL FORECAST'
+dsm.set('Config.1.SevereCore2.0', d, 0, 1)
+scmtRemove('Config.1.Airport.0')
+d = twc.Data()
+d.bkgImage = 'airport_bg'
+d.packageTitle = 'Airport Conditions'
+d.packageFlavor = 3
+d.shortPackageTitle = 'AIRPORT'
+dsm.set('Config.1.Airport.0', d, 0, 1)
+scmtRemove('Config.1.Core5.0')
+d = twc.Data()
+d.bkgImage = 'core_bg'
+d.packageTitle = 'Your Local Radar'
+d.packageFlavor = 0
+d.shortPackageTitle = '{loc_name.upper()} RADAR'
+dsm.set('Config.1.Core5.0', d, 0, 1)
+scmtRemove('Config.1.Core4.0')
+d = twc.Data()
+d.bkgImage = 'core_bg'
+d.packageTitle = 'Your Local Forecast'
+d.packageFlavor = 1
+d.shortPackageTitle = '{loc_name.upper()}'
+dsm.set('Config.1.Core4.0', d, 0, 1)
+scmtRemove('Config.1.Core3.0')
+d = twc.Data()
+d.bkgImage = 'core_bg'
+d.packageTitle = 'Your Local Forecast'
+d.packageFlavor = 1
+d.shortPackageTitle = '{loc_name.upper()}'
+dsm.set('Config.1.Core3.0', d, 0, 1)
+scmtRemove('Config.1.Core2.0')
+d = twc.Data()
+d.bkgImage = 'core_bg'
+d.packageTitle = 'Your Local Forecast'
+d.packageFlavor = 1
+d.shortPackageTitle = '{loc_name.upper()}'
+dsm.set('Config.1.Core2.0', d, 0, 1)
+scmtRemove('Config.1.Travel.0')
+d = twc.Data()
+d.bkgImage = 'travel_bg'
+d.packageTitle = 'Travel Forecast'
+d.packageFlavor = 1
+d.shortPackageTitle = 'TRAVEL'
+dsm.set('Config.1.Travel.0', d, 0, 1)
+scmtRemove('Config.1.Core1.0')
+d = twc.Data()
+d.bkgImage = 'core_bg'
+d.packageTitle = 'Your Local Forecast'
+d.packageFlavor = 1
+d.shortPackageTitle = '{loc_name.upper()}'
+dsm.set('Config.1.Core1.0', d, 0, 1)
+scmtRemove('Config.1.Traffic.0')
+d = twc.Data()
+d.activeCc_LongCurrentConditions = 0
+d.activeCc_ShortCurrentConditions = 0
+d.activeFcst_DaypartForecast = 0
+d.activeFcst_ExtendedForecast = 0
+d.activeFcst_TextForecast = 0
+d.activeLocal_PackageIntro = 1
+d.activeLocal_TrafficFlow = 1
+d.activeLocal_TrafficOverview = 1
+d.activeLocal_TrafficReport = 1
+d.activeSmLocal_TrafficSponsor = 1
+d.bkgImage = 'traffic_bg'
+d.packageTitle = 'Traffic Report'
+d.packageFlavor = 3
+d.shortPackageTitle = 'TRAFFIC'
+dsm.set('Config.1.Traffic.0', d, 0, 1)
+scmtRemove('Config.1.Health.0')
+d = twc.Data()
+d.bkgImage = 'health_bg'
+d.packageTitle = 'Weather & Your Health'
+d.packageFlavor = 2
+d.shortPackageTitle = 'HEALTH'
+dsm.set('Config.1.Health.0', d, 0, 1)
+#
+d = twc.Data()
+d.bkgImage = 'neighborhood_bg'
+dsm.set('Config.1.Core1.0.Local_MenuBoard.0', d, 0, 1)
+dsm.set('Config.1.Core2.0.Local_MenuBoard.0', d, 0, 1)
+dsm.set('Config.1.Core3.0.Local_MenuBoard.0', d, 0, 1)
+dsm.set('Config.1.Core4.0.Local_MenuBoard.0', d, 0, 1)
+dsm.set('Config.1.Core5.0.Local_MenuBoard.0', d, 0, 1)
+#
+d = twc.Data()
+d.locName = '{loc_name}'
+d.bkgImage = 'neighborhood_bg'
+d.affiliateName = 'Weatherscan'
+dsm.set('Config.1.Core1.0.Local_NetworkIntro.0', d, 0, 1)
+#
+d = twc.Data()
+d.bkgImage = 'airport_intro_bg'
+dsm.set('Config.1.Airport.0.Local_PackageIntro.0', d, 0, 1)
+#
+d = twc.Data()
+d.bkgImage = 'garden_intro_bg'
+dsm.set('Config.1.Garden.0.Local_PackageIntro.0', d, 0, 1)
+#
+d = twc.Data()
+d.bkgImage = 'travel_intro_bg'
+dsm.set('Config.1.Travel.0.Local_PackageIntro.0', d, 0, 1)
+#
+d = twc.Data()
+d.bkgImage = 'health_intro_bg'
+dsm.set('Config.1.Health.0.Local_PackageIntro.0', d, 0, 1)
+#
+d = twc.Data()
+d.bkgImage = 'international_intro_bg'
+dsm.set('Config.1.International.0.Local_PackageIntro.0', d, 0, 1)
+#
+"""
+    return output
+
+
+def compile_wxscan_airport_data(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
+    """Generate weatherscan airport data configuration."""
+    airport_records = [r for r in all_records if r.airport_id]
+    
+    if not airport_records:
+        return ""
+    
+    # Get first few airports for local conditions
+    local_airports = airport_records[:2]
+    airport_ids = [r.airport_id for r in local_airports]
+    airport_teccis = [r.teccis[0] if r.teccis else "" for r in local_airports]
+    airport_names = [r.name for r in local_airports]
+    
+    output = f"""#
+d = twc.Data()
+d.airportId = [{quote_list(airport_ids)}]
+d.obsStation = [{quote_list(airport_teccis)}]
+d.locName = [{quote_list(airport_names)}]
+dsm.set('Config.1.CityTicker_AirportDelays.0', d, 0, 1)
+#
+"""
+    # Add individual local airport conditions
+    for i, record in enumerate(local_airports):
+        output += f"""d = twc.Data()
+d.airportId = '{record.airport_id}'
+d.obsStation = '{record.teccis[0] if record.teccis else ""}'
+d.locName = '{record.name}'
+dsm.set('Config.1.Airport.0.Local_LocalAirportConditions.{i}', d, 0, 1)
+#
+"""
+    return output
+
+def compile_full_config(config: AggregatedConfig, all_records: list[LocationRecord], system_type: str = "domestic") -> str:
     from datetime import datetime
 
     secret_hehe = "#"
@@ -693,19 +1551,13 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
     start_time = datetime.now().strftime("%a %b %d %H:%M:%S %Z %Y")
     if "Oct 10" in start_time:
         import base64
-        secret_hehe = base64.b64decode("I+KghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghAoj4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCECiPioITioITioITioILioITioJDioITioITioITioJDioITioITioILioITioJDioITioITioITioITioITiooDio6Dio7bio7bio7/io7/io7/io7fio7bio7bio6Tio4DioYDioITioITioITioITioITioITioILioITioJDioITioITioILioITioJDioITioITioILioITioJDioITioKDioIQKI+KghOKghOKhgOKgoOKgkOKghOKghOKggeKghOKhgOKgkOKghOKgkOKgiOKghOKghOKghOKghOKjgOKjtOKjv+Kjv+Kjv+Kjv+Kjv+Kiv+Kjv+Kiv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjt+KjpuKhgOKghOKghOKghOKghOKggeKigOKgiOKghOKgiOKghOKhgOKggeKghOKhiOKghOKgoOKghOKghAoj4qCE4qCE4qCE4qGA4qCE4qGA4qCI4qCE4qGA4qCE4qGA4qCQ4qCE4qCE4qCE4qCE4qKA4qO04qO/4qO/4qG/4qO/4qK94qO+4qO94qK/4qO64qGv4qO34qO74qO94qO74qOf4qO/4qO/4qO/4qO/4qOm4qGA4qCE4qCE4qCE4qCE4qGA4qCQ4qCI4qCE4qCE4qCE4qCC4qCE4qCE4qCE4qCQ4qCECiPioITioITioIHioITioITiooDioITioIHioITioITiooDioITioITioITioITiooDio77io7/io7/ior/iob3ioa/io7/ior7io5/io7/io7Pior/iob3io77io7rio7Pio7vio7rio73io7viob/io7/io7/io6bioITioITioITioITioITioITioITioILioIHioITioJDioITioYDioITioIQKI+KghOKghOKgguKghOKggeKghOKghOKgkOKgiOKghOKghOKghOKghOKghOKghOKjv+Kjv+Kjv+Kjr+Kiv+KjveKju+KjveKjv+Kjv+Kjr+Kjv+Kjv+Kjv+Kjt+Kju+KiruKjl+Khr+KjnuKhvuKhueKhteKju+Kjv+Kjh+KghOKghOKghOKgguKghOKghOKgoOKgkOKghOKgguKghOKigOKghOKghAoj4qCE4qCE4qCC4qCI4qCE4qCI4qCE4qCE4qCC4qCE4qCB4qCE4qCE4qCE4qO44qO/4qO/4qO/4qO/4qG/4qG+4qOz4qK/4qK/4qK/4qC/4qC/4qCf4qCf4qCf4qC/4qOv4qG+4qOd4qOX4qOv4qKq4qKO4qKX4qOv4qO/4qOH4qCE4qCE4qCE4qCE4qKA4qCE4qKA4qCg4qCE4qCI4qCE4qCE4qGACiPioITioITioILioITioYjioITioKDioITioKDioJDioIjioITioITioITioIvioInioIHioJHioIHioonio4HioYHioIHioIHioITioITioITioITioITioITioITiooniorvior3io57ior7io5XiopXiop3ioo7io7/io7/ioYDioITioITioITioITiooDioITioITioYDioJDioIjioITioIQKI+KghOKghOKgguKggeKghOKghOKghOKghOKghOKghOKigOKghOKghOKghOKhp+KgoOKhgOKgkOKgguKjuOKjv+Kiv+KilOKilOKipOKiiOKgoeKhseKjqeKipOKitOKjnuKjvuKjveKivuKjveKjuuKhleKhleKhleKhveKjv+Kjv+Kgn+KituKghOKghOKghOKghOKghOKghOKgoOKghOKgguKghAoj4qCE4qCE4qCC4qCE4qCQ4qCE4qCg4qCE4qCE4qCC4qCE4qCE4qCE4qCE4qO/4qGz4qGE4qGi4qGC4qO/4qO/4qKv4qOr4qKX4qO94qOz4qGj4qOX4qKv4qOf4qO/4qO/4qK/4qG94qOz4qKX4qG34qO74qGO4qKO4qKO4qO/4qGH4qC74qOm4qCD4qCE4qCE4qCE4qGA4qCC4qCg4qCE4qCC4qCECiPioITioITioILioIjioITioJDioITioKDioITioITioILioITioITioITiob/ioZ3ioZzio5zio6zio7/io7/io7/io7fio6/iorrioLviobvio5ziopTioKHiopPiop3iopXioo/iopfioo/ioq/iobPioZ3iobjiobjio7jio6fioYDio7nio6DioITioITioITioYDioJDiooDioJDioIjioIQKI+KghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKjh+KiquKijuKhp+Khm+Kgm+Kgi+Kgi+KgieKgmeKjqOKjruKjpuKiheKhg+Kgh+KhleKhjOKhquKhqOKiuOKiqOKio+Kgq+KhqOKiquKiuOKgsOKjv+Kjh+KjvuKhnuKghOKghOKghOKghOKghOKghOKghOKghOKghAoj4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qKR4qGV4qG14qG74qOV4qCE4qCE4qCE4qCU4qGc4qGX4qGf4qOf4qK/4qKu4qKG4qGR4qKV4qOV4qKO4qKu4qGq4qGO4qGq4qGQ4qKF4qKH4qKj4qC54qGb4qO/4qGF4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCECiPioITioITioITioITioITioITioITioITioITioITioITioITioITioITiorjioo7ioKrioYrio4Tio7Dio7Dio7Xio5Xio67io6Lio7PiobjioajioKrioajioILioITioJHioo/ioJfioo3ioKrioaLioqPiooPioKrioYLio7nio73io7/io7fioYTioITioITioITioITioITioITioITioIQKI+KghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKhuOKgkOKgneKgi+Kgg+KgoeKhleKgrOKgjuKgrOKgqeKgseKimeKjmOKjkeKjgeKhiOKghOKghOKhleKijOKiiuKiquKguOKhmOKhnOKijOKgouKjuOKjvuKiv+Kjv+Kjv+KhgOKghOKghOKghOKghOKghOKghOKghAoj4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qGO4qOQ4qCy4qKS4qKa4qKb4qKb4qKb4qKb4qCb4qCd4qGL4qGr4qKJ4qCq4qGx4qCh4qCE4qCg4qKj4qKR4qCx4qGo4qGK4qGO4qKc4qKQ4qCF4qK84qG+4qOf4qO/4qO/4qO34qCR4qCQ4qKG4qGk4qOE4qCE4qCECiPioITiooLioJDioJDioYDioKHioITioIXioIjioITioIHioITioITio6DioYPioaLioKjiooDiooLiopDiopDiooTioJHioIziooziooLioKLioKHioZHioZjioozioKDioZjioYzioo7ioJzioYzioo7ioJzioYzioKLioKjiobjio7/iob3io7/io7/io7/io6PioITioqrioqrio7rioYTioIQKI+KghOKgguKghOKhgeKghOKgguKhgeKgiOKhgOKgguKjgeKitOKgi+KggeKhouKhkeKhqOKikOKikOKijOKgouKjguKio+KgqeKhguKhouKhkeKhkeKhjOKinOKgsOKhqOKiquKimOKglOKhseKimOKglOKhkeKgqOKiiOKgkOKivOKht+Kjv+Kju+Kit+Kir+KiguKgo+KhmOKglOKhouKiv+KhgAoj4qCE4qCF4qCC4qGA4qCC4qKB4qCE4qCE4qKA4qKO4qKO4qCC4qCE4qCE4qGi4qGD4qGi4qKK4qKU4qKi4qCj4qGq4qGi4qKj4qCq4qGi4qGR4qGV4qGc4qGc4qGM4qKO4qKi4qCx4qCo4qGC4qGR4qCo4qCE4qCB4qGC4qGo4qO64qG94qGv4qGr4qCj4qCh4qCi4qKR4qKI4qCC4qCM4qGG4qOnCiPioITioILioIHioITioIjioITioITioITiopjiopziopXioITioITio7DiobjioJDioIzioIbioofioI7ioY7ioo7ioo7ioo7ioo7ioo7ioo7ioI7ioY7ioarioJjioIzioILioIHioIHioITiooDioITiooTioqLioprioq7ioo/ioJ7ioajiooLioJXioInioIzioaDioILioIzioozioKLio7oKI+KghOKjgOKjpOKjtOKjtuKjtuKjtuKiluKhp+KhkeKgrOKhgOKigOKhr+Khg+KhjOKgiOKgiOKghOKghOKgiOKghOKghOKghOKghOKghOKgguKggeKghOKghOKghOKghOKghOKghOKihOKiguKiouKiseKiseKiseKgseKioeKikeKgjOKiguKgoeKgoOKgoeKgoeKhguKgheKileKigeKiiuKijgoj4qO/4qO/4qK/4qG/4qCf4qCJ4qCE4qCB4qKw4qKM4qCq4qOA4qG44qCo4qKC4qCM4qGK4qKE4qKC4qCg4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qKA4qCg4qKQ4qKo4qOY4qKU4qK14qCx4qGD4qGD4qGV4qG44qCQ4qGB4qCM4qGQ4qGo4qCo4qKK4qCM4qGi4qKR4qKF4qCq4qGw4qGxCiPio4/io67io6Tio6Tio6TioaTioITioK7ioo/ioKfio6PioqPioo7ioKjioITioITioKjioorioqrioqrioavioarioYrioZDioZDioZDioYzioazioarioario47iopfioZXioY7ioaPioIPiooXioIrioIbioKHioKDioYHioKLioZHioZDioozioozioKLioZHioYzioobioo7ioI7ioKrioIgKI+Khv+KhneKgr+Kij+Kgk+KghOKghOKigOKikOKgiOKhjuKhjuKhjuKghOKgiOKghOKgoeKiguKgguKhleKhleKhleKgleKijOKijOKiouKiseKiuOKhuOKjquKiruKho+Khk+KgjOKgoOKikeKgoeKiiOKgjOKijOKiguKgquKgqOKhguKjiuKgouKhouKio+KiseKguOKgkeKggeKghOKhgOKiggoj4qCB4qOI4qOA4qOA4qOA4qGA4qCE4qKQ4qCU4qCQ4qKo4qKi4qKj4qCK4qKA4qCo4qCo4qKQ4qCQ4qG44qG44qGq4qGx4qGR4qGM4qGG4qGH4qGH4qOP4qKu4qKq4qKq4qCK4qCE4qKR4qKQ4qCo4qGQ4qKM4qCi4qGq4qGY4qKM4qCi4qGi4qKj4qCq4qCK4qCE4qCE4qKA4qCC4qCB4qCE4qKCCiPio7/io7/io7/io7/ioIvioITioITioITioIzioKjioITioaPioZHiooXioITioITioKjiopDioKjiorDiorHioqPioqPioqriorjioqjioZrio57iopzioo7ioo7ioo7ioKrioJDioITioYbioaPioarioYrioarioYLioarioZjioYzioY7ioIrioITioZDioIjioYDiooLioIjioITioYHioYIKI+Khn+Kgn+KgneKgg+KghOKghOKghOKghOKijOKgquKghOKho+KgiuKghOKjt+KjhOKghOKghOKgjOKiuOKiuOKgseKhseKhoeKho+Kho+Khs+KhleKhh+Khh+Khh+KgpeKgkeKghOKioeKikeKgleKilOKikeKglOKhjOKhhuKgh+KggeKhgOKghOKggeKghOKiguKgkOKgoOKgiOKghOKiguKgkAoj4qOg4qOk4qO04qOk4qGk4qCE4qCE4qCE4qKQ4qCF4qCF4qGK4qCM4qCE4qO/4qO/4qO34qOk4qOk4qOC4qOF4qOR4qCw4qCo4qCi4qKR4qOV4qOc4qOY4qOo4qOm4qOl4qOs4qCE4qKQ4qKF4qKK4qKi4qKh4qCj4qCD4qCE4qGQ4qCg4qCE4qGC4qCh4qKI4qCg4qCI4qCE4qCh4qCI4qCE4qCoCiPio7/io7/io7/ioZ/ioITioITioITioITioITioozioKLioqjioKjioITiorniopvior/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ior/ioJ/ioITiorDiorDiorHioJHioIHiooDioJDioYDioILioITioKHioJDioJDioYDioILioYHioIzioKDioIHioIziopAKI+Khn+KgneKgiOKghOKghOKghOKghOKghOKgguKgoOKhkeKhseKikOKghOKiuOKhsuKhoOKghOKgieKgmeKgu+Kgv+Kjv+Kgv+Kgv+Kim+Kgq+KhqeKhs+KjuOKgvuKggeKigOKiouKgo+Kgg+KghOKgoOKgkOKhgOKgguKghOKgoeKgiOKghOKhgeKgguKghOKgoeKgkOKiiOKgoOKggeKgjOKgoAoj4qCE4qCE4qOA4qOk4qOk4qOA4qGA4qCE4qCC4qCE4qCQ4qKM4qCG4qKV4qCI4qOX4qKl4qKj4qKh4qKR4qKM4qGi4qGi4qKF4qKH4qKH4qKv4qK+4qG94qCD4qKA4qCU4qGF4qCB4qCE4qCE4qCo4qKA4qCh4qCQ4qCI4qCE4qCh4qKI4qCQ4qGA4qCF4qCM4qCg4qCB4qGC4qCE4qCh4qKI4qCQCiPio77io7/ior/iob/iob/ioIfioITioITioITioYDiooDioKLioK3ioobioKbiob/iobfiobfiobXiobfiobfio7Xior3ioa7io7fior3iob3ioZPioKTioKTioJXioYHioKDioITioIXioITioIXioITioILioIzioKDioKHioIjioITiooLioJDioKDioKjioKDioIHioITiooLioKHioJDioYg=").decode('utf-8')
-
-    if "Jun 07" in start_time:
-        import base64
-        secret_hehe = base64.b64decode("I+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khv+Kgv+Kim+Kjm+KjqeKjreKjreKjreKjreKjmeKjqeKjreKjreKjreKjreKjmeKjm+Kgu+Kiv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qG/4qCf4qOL4qO14qO24qO/4qO/4qO/4qO/4qO/4qC/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qG34qOm4qOZ4qC74qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/iob/ioovio7Tio7/io7/ioZ/iob/iorvio7/io7/ioZ/io7/ioLjio7/ioZnio7/io7/io4fiorvio7/io7/io7/io7/io7/io7fio43iobvio7fio6ziobvio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khv+Kio+KjtuKiv+Khv+Kii+KgjeKisOKgg+KjvuKjv+Kjv+KioeKjv+KhhuKiv+Kjp+KgueKjv+Kjv+KjhuKiu+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjpuKhueKjt+KjjOKgu+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qCP4qO04qG/4qGh4qCL4qG04qKj4qCi4qCD4qO84qO/4qO/4qKD4qO+4qO/4qGH4qOM4qC74qO34qGI4qC74qK/4qOm4qGZ4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO34qOM4qK/4qO34qGc4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioovio7zioZ/ioIHioITio6jioJ7ioYHiooDio77io7/iob/iooPio77io7/ioo/io7Tio7/io7fio67io5nioYLioITioKjiopnioYLioJnioLvior/io7/io7/io7/io7/io7/io6fioZnior/io4biorvio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khn+KjuOKjv+Kgg+KjtOKjtuKjv+KgluKjo+KjvuKjv+Kgn+KjoeKhvuKgn+Kjq+KjvOKjv+Kjv+Kjv+Kjv+Kjv+Kjt+KjtuKjpOKjvOKjt+KjtuKjpuKjrOKjmeKhu+Kiv+Kjv+Kjv+Kjv+Kjt+KjnOKgv+KjjuKiu+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qG/4qKg4qO/4qOv4qO84qG/4qKf4qOh4qO+4qC/4qKb4qOh4qOk4qO04qO24qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO34qOs4qGZ4qO/4qO/4qO/4qO34qO24qOG4qC54qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPio7/io7/io7/io7/io7/io7/io7/io7/io7/ioIPio77io7/io7/io6bio6Tio6TiooDio7bio77iopvioa3ioJDioJLioJLioKzioZvior/io7/io7/iorjio7/io7/ioYzio7/io7/iob/ioovioIXioJLioJDioJLioqzioZ3ior/io7fioZjio7/io7/io7/io7/io7/io7fioZzior/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KiuOKjv+Kjv+Kjv+Kjv+Kjv+Kig+KjvuKjv+KhoeKhj+KggOKgkOKggOKgguKggOKjiOKjvOKjv+Khh+KivuKjv+Kjv+KhhuKiv+Kjv+Kjp+KjgOKggOKgsOKgoOKgheKggOKiueKhjuKjv+Kjt+KhmOKjv+Kjv+Kjv+Kjv+Kjv+Khv+Kgt+KgrOKimeKiu+Kiv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qK44qO/4qO/4qO/4qO/4qGP4qO84qO/4qO/4qO/4qG/4qC24qC24qC24qKe4qOr4qO84qO/4qCf4qOh4qOt4qO24qOm4qO94qOM4qC74qO/4qOm4qOZ4qGy4qC24qC24qC24qK/4qO/4qO/4qO/4qOn4qC44qO/4qO/4qO/4qO/4qO/4qOm4qOk4qOt4qGt4qKA4qO/4qO/4qO/4qO/4qO/CiPio7/io7/ioZ/iorvio7/io7/io7/io7/ioY/io7jio7/io7/io7/iob/ioqDio7/io7/io7/io7/io7/io7/io7/io7/io7/ioJ/ioovio7Tiob/ioJPioLnio7/ioY/ioJnioL/iorfio47iorviobvio7/io7/io7/io7/io7/io7/io7/io7/io7/ioYbiorvio7/io7/io7/io7/io7/ioZ/ioonio5LioYHio7zio7/io7/io7/iob8KI+Kjv+Kjv+Kjt+KgoOKjieKhm+Kgv+Kim+KjoOKjv+Kjv+Kjv+Kjv+Khh+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khv+Kii+KjteKjv+KjpuKjm+KjoOKjtOKjvuKjv+Kjt+KjtuKjpOKjm+Kjm+KjvOKjv+KjpuKjmeKiv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjt+KiuOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khv+KioeKjv+Kjv+Kjv+Khv+Kgngoj4qO/4qCL4qKb4qC34qCN4qCb4qK74qO/4qO/4qO/4qO/4qO/4qO/4qKw4qO/4qO/4qO/4qO/4qO/4qG/4qOr4qO24qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO34qON4qK74qO/4qO/4qO/4qO/4qO/4qK44qO/4qO/4qO/4qO/4qO/4qO/4qG/4qOh4qO+4qO/4qO/4qO/4qO/4qGMCiPio7/ioIDioKbiobvior/io7/io7/io7/io7/io7/io7/io7/io5/iorjio7/io7/io7/io7/ioo/io7Tio7/io7/io7/ioL/ioJ/ioJvio5vioZvioInioInio4nioInioIniopvio5vioJvioZvioL/ioL/io7/io7/io7/io7fiobnio7/io7/io7/io7/iorjio7/io7/io7/io7/ioJ/io6vioLTioJ/io7vio7/io7/io7/iob/ioIEKI+Kjv+KjhuKgs+KjpuKjpOKjveKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjl+KiuOKjv+Kjv+Kjv+Kgh+KjvuKjv+Khn+Kgi+KggOKjrOKioeKjtuKjjuKjsOKjv+Kjv+KjgOKjvuKjv+Kjt+KjseKjtuKhjuKjpeKhlOKhguKijeKiv+Kjv+Kjt+KiueKjv+Kjv+Khn+KiuOKjv+Kjv+Kgv+Kjt+KhtuKgluKjq+KjtOKjv+Khv+Kgj+KggeKggOKgkgoj4qO/4qO/4qCj4qCc4qC74qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qC44qO/4qO/4qGP4qK44qO/4qGP4qKg4qK44qKH4qO/4qK74qO/4qO/4qO/4qO/4qO/4qGb4qO/4qO/4qO/4qK/4qO/4qC/4qO/4qOH4qO/4qKI4qCC4qK54qO/4qGM4qO/4qO/4qGH4qO/4qG/4qCb4qCm4qCE4qOA4qO/4qG/4qCJ4qCB4qCA4qCA4qCA4qCA4qCACiPio7/io7/io7fio6zioZDioLvior/ior/io7/io7/io7/io7/io7/ioYbiorvio7/io7/iorjio7/ioIDioobioobioKPioI3ioIDioIDioIDioIjioInioIDioIDioIDioIDioIDioIDioIDioIDioIDiopLio4vioJ/ioYTioIjio7/ioYfio7/iob/iorDiob/iooHio7bio6Tio43ioLvioIHioIDioIDioIDioIDio4Dio6Dio4Dio4AKI+Kjv+Kjv+Kjv+Kjv+Kjt+KjgOKgqOKivOKjv+Kjv+Kjv+Kjv+Kjv+Kjp+KguOKjv+Kjv+KiuOKjv+KggOKgmOKgiuKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKgiOKgieKgkOKggeKggOKjv+Kio+Kjv+Kgh+KhvOKig+KjvOKjv+Kjv+Kjv+KjpuKhkOKituKjtuKjtOKjtuKjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qO34qO24qOk4qOt4qOt4qOE4qCZ4qK/4qOG4qK74qO/4qGM4qO/4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qOv4qO84qG/4qKA4qO04qO/4qO/4qO/4qO/4qGP4qK/4qO34qOE4qGZ4qK+4qO/4qO/4qO/4qO/4qO/CiPio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioJ/ioqDioYbiorLio6zioYjio7/io7/io7/ioYTioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiorjio7/io7/ioYfio77io7/io7/io7/io7/io7/io7/iorjio7/io7/io7/ioYTior/io7/io7/io7/io78KI+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kgn+KjoOKjvuKjv+Kjt+KguOKjv+Khh+Kiu+Kjv+Kjv+Khh+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjuOKjv+Kjv+KioOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Khj+KjvOKjv+Kjv+Kjv+Khh+KguOKjv+Kjv+Kjv+Kjvwoj4qO/4qO/4qO/4qO/4qO/4qO/4qG/4qCb4qCw4qO/4qO/4qO/4qO/4qOG4qK54qO/4qC44qO/4qO/4qO/4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qO/4qO/4qGf4qO44qO/4qO/4qO/4qO/4qO/4qGf4qOw4qO/4qO/4qO/4qG/4qKB4qO34qOk4qG54qO/4qO/CiPio7/io7/io7/io7/ioZ/ioonio7Tio77io4bioLnio7/io7/io7/io7/io4bioLvioYbio7/io7/io7/ioYTioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioqDio7/io7/ioIfio7/io7/io7/io7/iob/ioovio7Tio7/io7/io7/ioJ/io6Dio77io7/io7/io7fioYzior8KI+Kjv+Kjv+Kjv+Kgi+KjtOKjv+Kjv+Kjv+Kjv+Kjt+KhiOKgu+Kjv+Kjv+Kjv+Kjv+Kjp+KiuOKjv+Kjv+Khh+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKiuOKjv+Kjv+KisOKjv+Kjv+Kjv+Kjv+Kjt+Kjv+Kjv+Kjv+Khv+Kig+KjtOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+KhjAoj4qO/4qO/4qKD4qO+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qOm4qGI4qC74qO/4qO/4qO/4qGI4qO/4qO/4qOn4qKg4qKk4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC04qCG4qO+4qO/4qGP4qO44qO/4qO/4qO/4qO/4qO/4qO/4qG/4qKL4qO04qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPio7/ioIfio77io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7bio4zioLvior/ioYfior/io7/io7/ioLDior/ioYLioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiooDio7/ioIfio7/io7/ioYfio7/io7/io7/io7/io7/iob/ioovio7Tio77io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+Khv+KiuOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjt+KjtuKjpuKiuOKjv+Kjv+KhhOKiv+Kjn+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjm+Kgu+KiuOKjv+Kjv+KigeKjv+Kjv+Kjv+Kgn+KjgeKjtOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qGH4qO+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGA4qO/4qO/4qOH4qCZ4qOr4qOk4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC44qC/4qGH4qO44qO/4qGf4qK44qC/4qKL4qOl4qO+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPioIfio7/io7/io7/io7/io7/io4bioLjio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioYfiorvio7/io7/ioYTioL/io6/ioYTioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiobvio7/iooDio7/io7/ioY/io6Dio77io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+KggOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+KhgOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjt+KiuOKjv+Kjv+Kjh+KisOKjv+Kil+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKitOKjp+KgmeKiuOKjv+Kjv+Kgg+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qCw4qO/4qO/4qO/4qO/4qO/4qO/4qOn4qC44qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGI4qO/4qO/4qO/4qOG4qKj4qO/4qKD4qGA4qCA4qCA4qCA4qCA4qCA4qCA4qOA4qKw4qOn4qC74qKh4qO/4qO/4qO/4qKw4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPioJjio7/io7/io7/io7/io7/io7/io7/ioYbiorvio7/io7/io7/io7/io7/io7/io7/io7/io7/ioYfior/io7/io6/ioLvio6bioInior/ioYfio7/iobfio7biorLio7/ioZ7io7/ioLrioJ/io6Dior/io7/io7/ioYfio7jio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78KI+KgiOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KhhOKiu+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KguOKjv+Kjv+Kjt+KhmeKit+KjpuKjlOKjiOKgieKgm+KgqeKgm+KigeKjieKjtOKhvuKii+KjvOKjv+Kjn+KigOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjvwoj4qGE4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGE4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGG4qK74qO/4qO/4qO/4qO34qOt4qOb4qC74qC/4qC/4qC/4qC/4qC/4qKb4qOr4qO04qO/4qO/4qO/4qCH4qO84qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/CiPioYfio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioYTioLnio7/io7/io7/io7/io7/io7/io7/io7/ioYzioL/io7/io7/io7/io7/io7/iob/io7/io7/io7/io7/ior/ior/io7/io7/io7/iob/ioI/io7zio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io78=").decode('utf-8')
-
-    if "Apr 20" in secret_hehe:
-        import base64
-        secret_hehe = base64.b64decode("II+KggOKggOKigOKhoOKgtOKgkuKgkuKimuKjk+KjsuKjtuKjpuKjpOKjgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qO04qOv4qO24qO24qG+4qC/4qCb4qOL4qOJ4qOl4qOk4qK24qG+4qO/4qO24qOE4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPiorjio7vio63iorXio7bio7Lior/io7vio5/io7/ioL7io73ioq/iob/io7Xioq/iob/io7fio4TioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KiuuKjv+KjnuKiv+KjvuKgn+Kgm+KgieKgieKgieKgieKgmeKgu+Kjv+KjveKir+Kjn+Kjs+Kiv+Kjt+KhgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCY4qO34qOv4qO/4qCB4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC74qO/4qK+4qO94qO74qOe4qO34qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIjioLvio7/io4bioYDioIDioIDioIDioIDioIDioIDioIDioIDioIDiorniob/io57io6fio5/iob7io4fioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKgieKgm+KgkuKggOKggOKggOKggOKggOKggOKggOKggOKggOKjv+Kjn+KhvuKjreKjn+Kjv+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK74qO+4qO94qOz4qOf4qO+4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio7/io5/iob7io6fio5/io77ioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio4Dio4DioKTioKTioJLioJLioKDioKTio4DioYDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKioOKjv+Kjr+Kjn+Kit+Kjq+Khn+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKhoOKikuKjieKgpeKggOKgkuKgguKgieKggeKggOKghOKggOKgieKgkeKgpuKjhOKhgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKA4qO+4qOf4qG+4qOt4qK/4qO94qCD4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKA4qCe4qCJ4qCB4qCA4qKA4qCA4qCC4qKA4qCC4qCI4qCg4qCA4qKB4qCI4qCA4qCE4qCA4qCI4qCT4qCm4qOE4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKA4qOACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiooDio77io5/iob7io73ioq/io5/ioY/ioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiorDio7nioIDioIDiobDioIPioIDioYDioILioojioIDioKDioIjiooDioIDioYHioITioIjioYDioKDioIHioKDioIjioJDioIDioYDioIDioJnioKLio4TioIDioIDioIDioIDioIDioIDio4DioKTio57ioL3ioZ4KI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKioOKjvuKjn+KhvuKjveKir+Kjn+KgnuKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjv+KggOKjp+KgnOKggeKigOKgkOKggOKhkOKggOKhgOKgguKgkOKggOKgoOKggOKhgOKgguKigOKgkOKggOKggeKisOKhjOKggOKhgOKggeKgoOKggeKggOKgmeKgouKjgOKgpOKgluKgi+Kgk+KgieKigOKjvuKghwoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qO04qO/4qOf4qG+4qO94qKv4qO/4qCL4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK44qK/4qCA4qC44qGG4qCA4qCC4qKA4qCC4qKA4qCQ4qCA4qCg4qCB4qKI4qCA4qCQ4qCA4qGQ4qCA4qCg4qCI4qKQ4qKu4qO34qCA4qCA4qCM4qCA4qCE4qCB4qCg4qCA4qKA4qCA4qCg4qCA4qCE4qKC4qO+4qGf4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioqDio77io7/io7Pioq/io7/io7nioJ/ioIHioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio4DiobTior7ioZvioIDioYDioLniopfioK7io4TioYDioKDioIDioIzioIDioZDioIDioKDioIHioKDioIDioITio6HioJbioInio7zio7vioILioIjiooDioJDioIDioIzioIDioZDioIDioYDioILioITio6LioZ/iob7ioIHioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKjtOKjv+Kjn+KhvuKjveKhu+KgnuKggeKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKit+KggOKiuOKhl+KggOKgoOKigOKggOKhgOKggOKgieKgm+KgkuKgtuKgtuKgtuKgluKgm+KggeKigOKgkuKgieKhgOKgoOKisOKjt+Khj+KipOKjrOKjpOKjpOKirOKjgOKhkOKggOKghOKigOKikOKhvOKih+Khv+KggeKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qO+4qO/4qO74qK+4qG94qCL4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCI4qCz4qOk4qOA4qCg4qCB4qCA4qCE4qCA4qCM4qKA4qCQ4qCg4qCA4qGA4qCA4qCE4qCQ4qCI4qCA4qGA4qCC4qCA4qO04qO/4qCf4qCA4qCA4qCZ4qKz4qG+4qCu4qO34qOd4qG74qC24qG04qKv4qO54qG/4qCB4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDiorjio7/io7Piob/ioIvioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiorDio7/io7/io7/io7fio77io6bio6zio4Tio4Dio4DioYLioJDioIDioojioIDioILioojioIDioITioKDioInioJ/ioIHioYDioKDiooHio4Lio4DiobzioILioIDioInioJnioLviorfio6fioJ/ioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKiuOKjv+KhveKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKigOKjv+Kjv+Kjv+KjveKjv+Kjv+Kgj+Kiv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjtuKjtuKjtuKjtuKjvuKjv+Kjv+Kjv+Kjv+Kjv+KhhOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCI4qK/4qGH4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK44qO/4qO/4qO/4qO/4qO/4qG/4qCA4qK44qO/4qO/4qOf4qOb4qC74qK/4qO/4qGf4qCA4qK44qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qOH4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioLnio4bioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio7/io7/io7/io7/io7/io7/io7/io6Tio6/io7/io7/io7/io7/io7fio7/io7/io4fioIDiooDio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/ioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKgiOKgs+KghOKhgOKggOKggOKggOKhoOKjpOKjpOKjpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKgpOKipOKjgOKjgOKjgOKjgOKjgOKhgOKggOKggOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjreKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kiv+Kjv+KjpuKjvuKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCB4qCA4qKw4qO+4qK/4qO94qO74qGH4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCJ4qCJ4qCJ4qCJ4qCZ4qCb4qCb4qCb4qCb4qCb4qO/4qGf4qCb4qC/4qK/4qO/4qO/4qO/4qO/4qOv4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioJjio7/io5/io77io7PioYfioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDio4Dio4Dio4Dio4Dio4Dio4Dio4Dio4Dio4Dio4zio4Dio4Dio6Dio6Tio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io7/iob/ioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKgiOKgm+KgmuKgm+KgkuKgkuKgm+KgkuKgkuKggOKggOKgiOKgieKgieKgieKgieKgieKgieKgieKgieKgieKgieKgieKgieKiu+Kjv+Kjv+Kjv+Kjv+Kgn+Kjv+Kiv+Kjv+Kiv+Khv+Kjv+Kjv+Kjv+Kjv+Kjv+Kiv+Khv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kgh+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKI4qG/4qGf4qO94qCP4qCA4qCY4qK/4qOm4qCv4qOd4qOz4qOb4qG84qOz4qKr4qO/4qO94qG+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGf4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiobTio4/io7Pio7nioY/ioIDioJDiooDioIDioIjioJvioLfioLbioKfioL7ioLfioL/iorvioZfioIniornio7/io7/io7/io7/io7/io7/ioZ/ioqDio6DioYDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKhv+KhnOKipuKjv+KggOKigOKggeKioOKjpOKjgeKgoOKggOKjuOKjhOKggOKhgOKigOKgiOKiu+KjpuKhgOKgu+Kjv+Kjv+Kjv+Kjv+Kgn+Kiv+KhjOKgmeKjo+KjhOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC54qOf4qO84qGP4qCA4qCg4qKA4qO+4qO/4qO/4qGE4qO84qO/4qO/4qOG4qCA4qCE4qCQ4qCA4qK74qO34qOE4qCJ4qC54qCL4qCB4qCA4qGA4qK74qOm4qCA4qKT4qGi4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioJjior/ioYfioIDioZDiorjio7/io7/io7/io7/io7/io7/io7/io7/ioIDioKDioIjioIDioITioJvio77io7fioITioIDioILioIHioYDioITiorvio7fioYDioKvio7fioYDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjp+KggOKigOKgmOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KggOKigOKgguKggeKgoOKjuOKgn+KggeKggOKghOKggeKgoOKggOKgoOKiiOKjv+Khv+KjhuKgmOKis+KhhOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qKg4qO/4qGA4qKA4qCg4qC54qO/4qO/4qO/4qO/4qO/4qO/4qGH4qCA4qGA4qCE4qCI4qGA4qK/4qOE4qGA4qCM4qCA4qGI4qCA4qKE4qOx4qKv4qO/4qOf4qG94qO34qOE4qCY4qKF4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDiooDiob7ioofiobfio4TioIDioYDioJnioL/io7/io7/io7/io7/ioIfioIDioYDioITioILiooDioqjio7/io7/io7fio6bio7Tio7jio6/io73io77ioZ/io77ior3io7Pior/io6bioYDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKjvOKij+Khs+KjjuKhneKjs+KjhOKggOKhgOKgiOKgmeKgv+Kgi+KggOKhgOKghOKggOKgguKhgOKiuOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjveKjq+KjvuKgn+Kgi+KggeKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK84qOL4qKu4qC14qOa4qG84qGx4qKO4qGf4qOm4qOQ4qCA4qCg4qCA4qCQ4qCA4qCg4qCI4qCA4qCE4qK44qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qC34qCL4qCB4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIjioLvio67io53iobLio5Xioavior3iobjiopbio63io5vioLbio6Tio4HioIjioIDioITioIHioKDiorjio7/io7/io7/io7/io7/io7/ioIPioIHioYfioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKigOKjtOKjvuKjv+Kjv+Kjt+Kjp+Kjj+Kjp+Kim+KhvOKipuKhueKjmuKhpeKij+Khn+Kjs+KipuKjnOKisuKgvOKju+Kjn+Kjn+Kjv+Kjv+Kjv+KjtuKjvuKgl+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qK/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGP4qCJ4qCb4qCb4qCb4qCb4qCb4qCb4qK74qO+4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGP4qCB4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIjioJnioL/io7/io7/io7/io7/io7/ioJ/ioIHioIDioIDioIDioIDioIDioIDioIDiorjio7/io7/io7/io7/io7/io7/io7/io7/io7/io7/io4fioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggeKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKiuOKjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+Kjv+KjpuKhgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggAoj4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC74qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qO/4qGE4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACiPioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIjioLvior/io7/io7/io7/io7/io7/io7/io7/io7/iob/ioIfioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIAKI+KggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKgiOKgieKgm+Kgm+Kgm+Kgm+Kgm+KgieKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggA==").decode("utf-8")
-
+        secret_hehe = base64.b64decode("I+KghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghAoj4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCECg==").decode('utf-8')
+    
     sections.append(f"# Created on {start_time}")
-    sections.append("# SCMT Configuration File for IntelliStar 1 Domestic")
+    sections.append(f"# SCMT Configuration File for IntelliStar 1 {system_type.capitalize()}")
     sections.append("# Generated by IntelliStar Config Generator by @sspwxr (raii)")
+    sections.append("#")
+    sections.append(f"wxdata.setTimeZone('{get_timezone_by_location_id(all_records[0].loc_id)}')")
     sections.append("#")
     sections.append(secret_hehe)
     sections.append("#")
@@ -724,28 +1576,51 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
     sections.append("dsm.set('scmt_configType', 'domestic',0)")
     sections.append("dsm.set('scmt.ProductTypes',['Animated_Logo_Sponsor','Copy_Split','Custom','Logo_Sponsor', 'Dealer'], 0)")
     sections.append("#")
-    sections.append(compile_i1_interest_list(config))
-    sections.append(compile_i1_metadata(config))
-    sections.append("#")
-    sections.append(compile_i1_airport_data(config, all_records))
-    sections.append("#")
-    sections.append(compile_i1_bulletin_override())
-    sections.append("#")
-    sections.append(compile_i1_vocal_schedule())
-    sections.append("#")
-    sections.append(compile_i1_scmt_removes())
-    sections.append("#")
-    sections.append(compile_i1_non_image_maps())
-    sections.append("#")
-    sections.append("#")
-    sections.append(compile_i1_currentconditions(config, all_records))
-    sections.append("#")
-    sections.append(compile_i1_forecast(config))
-    sections.append("#")
-    sections.append(compile_i1_airport_delays(config, all_records))
-    sections.append("#")
-    sections.append(compile_i1_travel_forecast(config, all_records))
-    sections.append("#")
+    if system_type == "domestic":
+        sections.append(compile_i1_map_data(config, all_records))
+        sections.append("#")
+        sections.append(compile_i1_interest_list(config, "domestic"))
+        sections.append(compile_i1_metadata(config, "domestic"))
+        sections.append("#")
+        sections.append(compile_i1_airport_data(config, all_records))
+        sections.append("#")
+        sections.append(compile_i1_bulletin_override())
+        sections.append("#")
+        sections.append(compile_i1_vocal_schedule())
+        sections.append("#")
+        sections.append(compile_i1_scmt_removes())
+        sections.append("#")
+        sections.append(compile_i1_non_image_maps())
+        sections.append("#")
+        sections.append("#")
+        sections.append(compile_i1_currentconditions(config, all_records, "domestic"))
+        sections.append("#")
+        sections.append(compile_i1_forecast(config, "domestic"))
+        sections.append("#")
+        sections.append(compile_i1_airport_delays(config, all_records))
+        sections.append("#")
+        sections.append(compile_i1_travel_forecast(config, all_records))
+        sections.append("#")
+    if system_type == "weatherscan":
+        sections.append(compile_i1_map_data(config, all_records, "weatherscan"))
+        sections.append("#")
+        sections.append(compile_i1_interest_list(config, "weatherscan"))
+        sections.append(compile_i1_metadata(config, "weatherscan"))
+        sections.append("#")
+        sections.append(compile_wxscan_airport_data(config, all_records))
+        sections.append("#")
+        sections.append(compile_i1_bulletin_override())
+        sections.append("#")
+        sections.append(compile_i1_vocal_schedule())
+        sections.append("#")
+        sections.append(compile_wxscan_packages(config))
+        sections.append("#")
+        sections.append(compile_i1_currentconditions(config, all_records, "weatherscan"))
+        sections.append("#")
+        sections.append(compile_i1_forecast(config, "weatherscan"))
+        sections.append("#")
+        sections.append(compile_i1_travel_forecast(config, all_records))
+        sections.append("#")
     
     end_time = datetime.now().strftime("%a %b %d %H:%M:%S %Z %Y")
     sections.append("Log.info('scmt config completed')")
@@ -753,8 +1628,344 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
     
     return "\n".join(sections)
 
+
+def compile_i1_map_data(config: AggregatedConfig, all_records: list[LocationRecord], system_type: str = "domestic") -> str:
+    """
+    Generate map data configurations for all map products.
+    
+    This creates the wxdata.setMapData() and dsm.set() calls for each map product,
+    calculating mapcut coordinates from the primary location's lat/lon.
+    """
+    if config.lat is None or config.lon is None:
+        return "# MAP DATA SKIPPED - No lat/lon available for primary location"
+    
+    lines = []
+    lines.append("#")
+    lines.append("# MAP DATA CONFIGURATION")
+    lines.append("# Generated from primary location coordinates")
+    lines.append(f"# Lat: {config.lat}, Lon: {config.lon}")
+    lines.append("#")
+    
+    primary_name = config.name if config.name else "Location"
+    
+    mapcuts = get_all_mapcut_coordinates(config.lat, config.lon)
+
+    standard_vectors = [
+        'mercator.us.ushighways.vg',
+        'mercator.us.counties.vg',
+        'mercator.us.states.vg',
+        'mercator.us.coastlines.vg',
+        'mercator.us.statehighways.vg',
+        'mercator.us.otherroutes.vg',
+        'mercator.us.interstates.vg',
+    ]
+    vectors_str = ",".join([f"'{v}'" for v in standard_vectors])
+    
+    vector_style = """  vector = [
+             (( 6,(20,20,20,96),1,),(('statehighways',),),),
+             (( 6,(20,20,20,96),1,),(('ushighways',),),),
+             (( 6,(20,20,20,96),1,),(('interstates',),),),
+             (( 6,(20,20,20,96),1,),(('otherroutes',),),),
+             (( 1,(20,20,20,255),2,),(('counties',),),),
+             (( 2,(20,20,20,255),2,),(('states',),),),
+             (( 1,(20,20,20,255),2,),(('coastlines',),),),
+             (( 3,(130,130,130,255),2,),(('statehighways',),),),
+             (( 3,(130,130,130,255),2,),(('ushighways',),),),
+             (( 3,(130,130,130,255),2,),(('interstates',),),),
+             (( 3,(130,130,130,255),2,),(('otherroutes',),),),
+             ],"""
+    
+    product_params = {
+        "Radar_LocalDoppler": {
+            "datacutType": "radar.us",
+            "mapFinalSize": (240, 137),
+            "dataFinalSize": (240, 137),
+            "mapMilesSize": (141, 97),
+        },
+        "NationalLdl_DopplerRadar": {
+            "datacutType": "radar.us",
+            "mapFinalSize": (193, 110),
+            "dataFinalSize": (193, 110),
+            "mapMilesSize": (141, 97),
+        },
+        "Local_MetroDopplerRadar": {
+            "datacutType": "radar.us",
+            "mapFinalSize": (720, 480),
+            "dataFinalSize": (720, 480),
+            "mapMilesSize": (127, 102),
+        },
+        "Local_MetroForecastMap": {
+            "datacutType": "forecast.us",
+            "mapFinalSize": (720, 480),
+            "dataFinalSize": (720, 480),
+            "mapMilesSize": (141, 94),
+        },
+        "Local_MetroObservationMap": {
+            "datacutType": "observation.us",
+            "mapFinalSize": (720, 480),
+            "dataFinalSize": (720, 480),
+            "mapMilesSize": (141, 94),
+        },
+        "Local_RegionalDopplerRadar": {
+            "datacutType": "radar.us",
+            "mapFinalSize": (720, 480),
+            "dataFinalSize": (720, 480),
+            "mapMilesSize": (339, 226),
+        },
+        "Local_RegionalForecastMap": {
+            "datacutType": "forecast.us",
+            "mapFinalSize": (720, 480),
+            "dataFinalSize": (720, 480),
+            "mapMilesSize": (564, 376),
+        },
+        "Local_RegionalObservationMap": {
+            "datacutType": "observation.us",
+            "mapFinalSize": (720, 480),
+            "dataFinalSize": (720, 480),
+            "mapMilesSize": (564, 376),
+        },
+    }
+    
+    def calc_datacut_coord(mapcut_x: int, mapcut_y: int, size_w: int, size_h: int) -> tuple[int, int]:
+        center_x = mapcut_x + size_w // 2
+        center_y = mapcut_y + size_h // 2
+        radar_x = int(center_x / 9.4)
+        radar_y = int(center_y / 9.4)
+        return (radar_x, radar_y)
+    
+    for product_name, (cut_x, cut_y) in mapcuts.items():
+        if product_name not in product_params:
+            continue
+            
+        params = product_params[product_name]
+        size = MAP_PRODUCT_SIZES[product_name]
+        
+        # Calculate datacutCoordinate (approximate)
+        datacut = calc_datacut_coord(cut_x, cut_y, size[0], size[1])
+        
+        # Estimate datacutSize based on mapMilesSize ratio
+        datacut_size = (int(params["mapMilesSize"][0] * 1.25), int(params["mapMilesSize"][1] * 1.05))
+        
+        lines.append(f"#")
+        lines.append(f"# {product_name} (MAP DATA)")
+        lines.append(f"#")
+        lines.append(f"d = twc.Data(mapName='mercator.us.bfg',")
+        lines.append(f"             mapcutCoordinate=({cut_x},{cut_y}),")
+        lines.append(f"             mapcutSize=({size[0]},{size[1]}),")
+        lines.append(f"             mapFinalSize={params['mapFinalSize']},")
+        lines.append(f"             mapMilesSize={params['mapMilesSize']},")
+        lines.append(f"             datacutType='{params['datacutType']}',")
+        lines.append(f"             datacutCoordinate={datacut},")
+        lines.append(f"             datacutSize={datacut_size},")
+        lines.append(f"             dataFinalSize={params['dataFinalSize']},")
+        lines.append(f"             dataOffset=(0,0),")
+        lines.append(f"             vectors=[{vectors_str},],")
+        lines.append(f")")
+        lines.append(f"wxdata.setMapData('Config.1.{product_name}', d, 0)")
+        lines.append(f"#")
+        lines.append(f"# {product_name} (PRODUCT DATA)")
+        lines.append(f"#")
+        
+        # Calculate center position for locator dot (center of the final map size)
+        final_w, final_h = params["mapFinalSize"]
+        center_pos = (final_w // 2, final_h // 2)
+        
+        lines.append(f"d = twc.Data(")
+        lines.append(f"  tiffImage = [")
+        lines.append(f"             (")
+        lines.append(f"               ('locatorDotSmallOutline',0,2,1,),")
+        lines.append(f"              ( ( {center_pos},),")
+        lines.append(f"              ),")
+        lines.append(f"             ),")
+        lines.append(f"             (")
+        lines.append(f"               ('locatorDotSmall',0,1,0,),")
+        lines.append(f"              ( ( {center_pos},),")
+        lines.append(f"              ),")
+        lines.append(f"             ),")
+        lines.append(f"        ],")
+        lines.append(f"  textString = [")
+        lines.append(f"             (")
+        lines.append(f"               ('Interstate-Bold',14,(229,229,229,205),1,0,0,(20,20,20,68),1,0,0,),")
+        lines.append(f"              ( ( ({center_pos[0]-16},{center_pos[1]-9}),'{primary_name}',),")
+        lines.append(f"              ),")
+        lines.append(f"             ),")
+        lines.append(f"             (")
+        lines.append(f"               ('Interstate-Bold',14,(229,229,229,255),1,0,0,(20,20,20,68),2,0,0,),")
+        lines.append(f"              ( ( ({center_pos[0]-16},{center_pos[1]-9}),'{primary_name}',),")
+        lines.append(f"              ),")
+        lines.append(f"             ),")
+        lines.append(f"        ],")
+        lines.append(vector_style)
+        lines.append(f")")
+        lines.append(f"dsm.set('Config.1.{product_name}', d, 0)")
+        lines.append("")
+    
+    # Add the interest lists for map/radar data binding
+    lines.append("#")
+    lines.append("# Map and Radar Interest Lists")
+    lines.append("#")
+    
+    if system_type == "weatherscan":
+        # Add static international forecast maps (Canada and Mexico)
+        lines.append("# MAP: 240")
+        lines.append("# Local_InternationalForecast (MAP DATA) - Canada")
+        lines.append("#")
+        lines.append("d = twc.Data(mapName='lambert.ca.tif',")
+        lines.append("             mapcutCoordinate=(0,3),")
+        lines.append("             mapcutSize=(720,480),")
+        lines.append("             mapFinalSize=(720,480),")
+        lines.append("             mapMilesSize=(3635,2907),")
+        lines.append(")")
+        lines.append("wxdata.setMapData('Config.1.International.0.Local_InternationalForecast.0', d, 0)")
+        lines.append("#")
+        lines.append("# Local_InternationalForecast (PRODUCT DATA) - Canada")
+        lines.append("#")
+        lines.append("d = twc.Data(")
+        lines.append("  fcstIcon = [")
+        lines.append("             (")
+        lines.append("               (0,1,0,),")
+        lines.append("               ( ( '71182000',(574,186),),")
+        lines.append("                 ( '71627001',(538,92),),")
+        lines.append("                 ( '71852000',(365,93),),")
+        lines.append("                 ( '71879001',(241,140),),")
+        lines.append("                 ( '71892001',(132,103),),")
+        lines.append("                 ( '71913000',(374,189),),")
+        lines.append("                 ( '71936000',(247,234),),")
+        lines.append("                 ( '71966000',(125,285),),")
+        lines.append("               ),")
+        lines.append("             ),")
+        lines.append("        ],")
+        lines.append("  fcstValue = [")
+        lines.append("             (")
+        lines.append("               ('Frutiger_Bold',26,(212,212,0,255),1,0,'highTemp',1,(),1,0,),")
+        lines.append("               ( ( '71182000',(571,226),),")
+        lines.append("                 ( '71627001',(535,132),),")
+        lines.append("                 ( '71852000',(362,133),),")
+        lines.append("                 ( '71879001',(238,180),),")
+        lines.append("                 ( '71892001',(129,143),),")
+        lines.append("                 ( '71913000',(371,229),),")
+        lines.append("                 ( '71936000',(244,274),),")
+        lines.append("                 ( '71966000',(122,325),),")
+        lines.append("               ),")
+        lines.append("             ),")
+        lines.append("        ],")
+        lines.append("  textString = [")
+        lines.append("             (")
+        lines.append("               ('Frutiger_Black',19,(212,212,212,255),1,0,0,(),1,0,1,),")
+        lines.append("               ( ( (510,260),'Churchill Falls',),")
+        lines.append("                 ( (497,166),'Montreal',),")
+        lines.append("                 ( (322,167),'Winnipeg',),")
+        lines.append("                 ( (194,214),'Edmonton',),")
+        lines.append("                 ( (84,177),'Vancouver',),")
+        lines.append("                 ( (335,263),'Churchill',),")
+        lines.append("                 ( (192,308),'Yellowknife',),")
+        lines.append("                 ( (90,359),'Dawson',),")
+        lines.append("               ),")
+        lines.append("             ),")
+        lines.append("        ],")
+        lines.append(")")
+        lines.append("dsm.set('Config.1.International.0.Local_InternationalForecast.0', d, 0)")
+        lines.append("# MAP: 246")
+        lines.append("# Local_InternationalForecast (MAP DATA) - Mexico")
+        lines.append("#")
+        lines.append("d = twc.Data(mapName='mercator.mx.tif',")
+        lines.append("             mapcutCoordinate=(0,3),")
+        lines.append("             mapcutSize=(720,480),")
+        lines.append("             mapFinalSize=(720,480),")
+        lines.append("             mapMilesSize=(2979,1831),")
+        lines.append(")")
+        lines.append("wxdata.setMapData('Config.1.International.0.Local_InternationalForecast.1', d, 0)")
+        lines.append("#")
+        lines.append("# Local_InternationalForecast (PRODUCT DATA) - Mexico")
+        lines.append("#")
+        lines.append("d = twc.Data(")
+        lines.append("  fcstIcon = [")
+        lines.append("             (")
+        lines.append("               (0,1,0,),")
+        lines.append("               ( ( '76255000',(206,261),),")
+        lines.append("                 ( '76393000',(346,201),),")
+        lines.append("                 ( '76405000',(222,166),),")
+        lines.append("                 ( '76595000',(570,121),),")
+        lines.append("                 ( '76679001',(368,95),),")
+        lines.append("               ),")
+        lines.append("             ),")
+        lines.append("        ],")
+        lines.append("  fcstValue = [")
+        lines.append("             (")
+        lines.append("               ('Frutiger_Bold',26,(212,212,0,255),1,0,'highTemp',1,(),1,0,),")
+        lines.append("               ( ( '76255000',(203,301),),")
+        lines.append("                 ( '76393000',(343,241),),")
+        lines.append("                 ( '76405000',(211,206),),")
+        lines.append("                 ( '76595000',(567,161),),")
+        lines.append("                 ( '76679001',(365,135),),")
+        lines.append("               ),")
+        lines.append("             ),")
+        lines.append("        ],")
+        lines.append("  textString = [")
+        lines.append("             (")
+        lines.append("               ('Frutiger_Black',19,(212,212,212,255),1,0,0,(),1,0,1,),")
+        lines.append("               ( ( (165,335),'Guaymas',),")
+        lines.append("                 ( (298,275),'Monterrey',),")
+        lines.append("                 ( (188,240),'La Paz',),")
+        lines.append("                 ( (538,195),'Cancun',),")
+        lines.append("                 ( (315,169),'Mexico City',),")
+        lines.append("               ),")
+        lines.append("             ),")
+        lines.append("        ],")
+        lines.append(")")
+        lines.append("dsm.set('Config.1.International.0.Local_InternationalForecast.1', d, 0)")
+        lines.append("#")
+        # Weatherscan interest lists
+        lines.append("wxdata.setInterestList('lambert.us','1',['precipQpfForecast.us','estimatedPrecip.us','travelWeather.us','snowfallQpfForecast.us','palmerDrought.us','frostFreeze.us','radarSatellite.us',])")
+        lines.append("wxdata.setInterestList('mercator.us','1',['radar.us',])")
+        lines.append("#")
+        lines.append("#")
+        lines.append("wxdata.setInterestList('travelWeather.us.cuts','1',['Config.1.Travel.0.Local_NationalTravelWeather.0',])")
+        lines.append("wxdata.setInterestList('precipQpfForecast.us.cuts','1',['Config.1.Garden.0.Local_PrecipitationQpfForecast.0',])")
+        lines.append("wxdata.setInterestList('radar.us.cuts','1',['Config.1.Radar_LocalDoppler.0','Config.1.Core1.0.Local_LocalDoppler.0','Config.1.Core2.0.Local_LocalDoppler.0','Config.1.Core3.0.Local_LocalDoppler.0','Config.1.SevereCore2.0.Local_LocalDoppler.0','Config.1.SevereCore1B.0.Local_LocalDoppler.0','Config.1.Core5.0.Local_LocalDoppler.0','Config.1.SevereCore1A.0.Local_LocalDoppler.0',])")
+        lines.append("wxdata.setInterestList('estimatedPrecip.us.cuts','1',['Config.1.Garden.0.Local_EstimatedPrecipitation.0',])")
+        lines.append("wxdata.setInterestList('frostFreeze.us.cuts','1',['Config.1.Garden.0.Local_FrostFreezeWarnings.0',])")
+        lines.append("wxdata.setInterestList('radarSatellite.us.cuts','1',['Config.1.Core4.0.Local_RadarSatelliteComposite.0','Config.1.SevereCore1A.0.Local_RadarSatelliteComposite.0',])")
+        lines.append("wxdata.setInterestList('snowfallQpfForecast.us.cuts','1',['Config.1.Ski.0.Local_SnowfallQpfForecast.0',])")
+        lines.append("wxdata.setInterestList('palmerDrought.us.cuts','1',['Config.1.Garden.0.Local_PalmerDroughtSeverity.0',])")
+        lines.append("#")
+        lines.append("wxdata.setInterestList('mapData','1',['lambert.ca','mercator.us','mercator.mx','lambert.us',])")
+        lines.append("#")
+        lines.append("wxdata.setInterestList('imageData','1',['frostFreeze.us','palmerDrought.us','radarSatellite.us','snowfallQpfForecast.us','precipQpfForecast.us','radar.us','travelWeather.us','estimatedPrecip.us',])")
+    else:
+        # Domestic interest lists
+        lines.append("wxdata.setInterestList('mercator.us','1',['radar.us',])")
+        lines.append("wxdata.setInterestList('radar.us.cuts','1',['Config.1.NationalLdl_DopplerRadar','Config.1.Radar_LocalDoppler','Config.1.Local_MetroDopplerRadar','Config.1.Local_RegionalDopplerRadar',])")
+        lines.append("wxdata.setInterestList('mapData','1',['mercator.us',])")
+        lines.append("wxdata.setInterestList('imageData','1',['radar.us',])")
+    
+    lines.append("# END OF MAPS")
+    lines.append("# commit for map stuff to avoid missing updates")
+    lines.append("ds.commit()")
+    
+    return "\n".join(lines)
+
+
 def main() -> None:
     """Main entry point for the configuration generator."""
+    
+    # Prompt for system type
+    print("\nSelect the system type to generate a config for:")
+    print("  1. Domestic IntelliStar")
+    print("  2. Weatherscan IntelliStar")
+    while True:
+        system_choice = input("Enter choice (1 or 2): ").strip()
+        if system_choice == "1":
+            system_type = "domestic"
+            break
+        elif system_choice == "2":
+            system_type = "weatherscan"
+            break
+        else:
+            print("Invalid choice. Please enter 1 or 2.")
+    
+    print(f"\nGenerating config for: {system_type.upper()}")
+    
     main_record_data = prompt_for_location()
     
     if main_record_data is None:
@@ -768,7 +1979,6 @@ def main() -> None:
     main_country = main_record_data.get('cntryCd', '')
     location_id = main_record_data.get('locId', '')
 
-    # Convert lat/lon to float if they exist
     if main_lat:
         try:
             main_lat = float(main_lat)
@@ -780,7 +1990,7 @@ def main() -> None:
         except (ValueError, TypeError):
             main_lon = None
 
-    nearby = prompt_for_nearby_locations(max_nearby=7)
+    nearby = prompt_for_nearby_locations(max_nearby=8)
     
     print(f"\nNearby locations entered: {len(nearby)}")
     for record in nearby:
@@ -797,7 +2007,6 @@ def main() -> None:
 
     print(f"\nMain Location ID: {location_id[:8] if location_id else 'N/A'}")
     
-    # Main location is already a full database record
     main_record = LocationRecord.from_db_record(
         main_record_data, 
         name=main_location_name
@@ -812,7 +2021,6 @@ def main() -> None:
 
     processed_loc_ids = {location_id}
     
-    # Nearby locations are already full database records
     for record_data in nearby:
         loc_id = record_data.get('locId', '')
         name = record_data.get('prsntNm', '')
@@ -844,12 +2052,18 @@ def main() -> None:
     print(f"Climate IDs: {config.climate_ids}")
 
     print("\n")
-    print(f"INTELLISTAR CONFIG GENERATED FOR {config.name.upper()}")
-    print("=" * 60)
     
-    full_config = compile_full_config(config, all_records)
+    if system_type == "domestic":
+        print(f"DOMESTIC INTELLISTAR CONFIG GENERATED FOR {config.name.upper()}")
+        print("=" * 60)
+        full_config = compile_full_config(config, all_records, system_type="domestic")
+        output_filename = f"output/{config.name.replace(' ', '_').replace('/', '_')}_i1_config.py"
+    else:
+        print(f"WEATHERSCAN INTELLISTAR CONFIG GENERATED FOR {config.name.upper()}")
+        print("=" * 60)
+        full_config = compile_full_config(config, all_records, system_type="weatherscan")
+        output_filename = f"output/{config.name.replace(' ', '_').replace('/', '_')}_wxscan_config.py"
     
-    output_filename = f"output/{config.name.replace(' ', '_').replace('/', '_')}_i1_config.py"
     Path("output").mkdir(exist_ok=True)
     
     with open(output_filename, 'w') as f:
@@ -857,13 +2071,6 @@ def main() -> None:
     
     print(f"\nConfiguration saved to: {output_filename}")
     print(f"Total lines: {len(full_config.splitlines())}")
-    print("\nPreview (first 50 lines):")
-    print("-" * 60)
-    preview_lines = full_config.splitlines()[:50]
-    for line in preview_lines:
-        print(line)
-    if len(full_config.splitlines()) > 50:
-        print(f"\n... ({len(full_config.splitlines()) - 50} more lines)")
 
 if __name__ == "__main__":
     main()
