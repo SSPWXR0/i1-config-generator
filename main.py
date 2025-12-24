@@ -1262,9 +1262,8 @@ dsm.set('Config.1.Ldl_TravelForecast', d, 0, 1)"""
     return output
 
 
-def compile_i1_scmt_removes() -> str:
-    """Generate scmtRemove calls for all products."""
-    products = [
+def compile_i1_scmt_removes(system_type: str) -> str:
+    domestic_products = [
         'Config.1.Local_OutdoorActivityForecast',
         'Config.1.Ldl_LocalStarIDMessage',
         'Config.1.Ldl_HurricaneWatch',
@@ -1305,8 +1304,197 @@ def compile_i1_scmt_removes() -> str:
         'Config.1.Local_TrafficFlow',
         'Config.1.Ldl_CurrentMTDPrecip',
     ]
+    weatherscan_products = [
+        'Config.1.Travel.LasCrawl_Default',
+        'Config.1.Ski.LasCrawl_Default',
+        'Config.1.Golf.LasCrawl_Default',
+        'Config.1.BoatAndBeach.LasCrawl_Default',
+        'Config.1.Health.LasCrawl_Default',
+        'Config.1.Traffic.LasCrawl_Default',
+        'Config.1.SpanishCore.LasCrawl_Default',
+        'Config.1.International.LasCrawl_Default',
+        'Config.1.Core.LasCrawl_Default',
+        'Config.1.Garden.LasCrawl_Default',
+        'Config.1.Airport.LasCrawl_Default',
+        'Config.1.LasCrawl_Default',
+        'Config.1.Core2Spanish.LasCrawl_Default',
+        'Config.1.Core2.LasCrawl_Default',
+        'Config.1.Core5.LasCrawl_Default',
+        'Config.1.Core4Spanish.LasCrawl_Default',
+        'Config.1.Core3.LasCrawl_Default',
+        'Config.1.Core1.LasCrawl_Default',
+        'Config.1.Core4.LasCrawl_Default',
+        'Config.1.LocalBroadcaster.LasCrawl_Default',
+        'Config.1.Health.0.Local_SunSafetyFacts.0',
+        'Config.1.Airport.0.Local_NationalAirportConditions.0',
+        'Config.1.Airport.0.Fcst_DaypartForecast.0',
+        'Config.1.Core4.0.Local_CurrentConditions.0',
+        'Config.1.Ski.0.Cc_LongCurrentConditions.0',
+        'Config.1.Airport.0.Local_NationalAirportConditions.1',
+        'Config.1.Traffic.0.Local_TrafficReport.0',
+        'Config.1.Ski.0.Local_SkiConditions.0',
+        'Config.1.Core4.0.Fcst_DaypartForecast.0',
+        'Config.1.SevereCore1B.0.Fcst_ExtendedForecast.0',
+        'Config.1.Travel.0.Fcst_TextForecast.0',
+        'Config.1.Traffic.0.Fcst_ExtendedForecast.0',
+        'Config.1.Traffic.0.Local_TrafficFlow.0',
+        'Config.1.Core1.0.Local_LocalObservations.0',
+        'Config.1.Core3.0.Fcst_DaypartForecast.0',
+        'Config.1.Airport.0.Fcst_ExtendedForecast.0',
+        'Config.1.Airport.0.Local_LocalAirportConditions.1',
+        'Config.1.Health.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Garden.0.Fcst_DaypartForecast.0',
+        'Config.1.Core5.0.Cc_LongCurrentConditions.0',
+        'Config.1.Core5.0.Local_MenuBoard.0',
+        'Config.1.Traffic.0.Fcst_TextForecast.0',
+        'Config.1.SevereCore2.0.Local_SevereWeatherMessage.0',
+        'Config.1.SevereCore1A.0.Local_CurrentConditions.0',
+        'Config.1.Core2.0.Local_DaypartForecast.0',
+        'Config.1.CityTicker_AirportDelays.0',
+        'Config.1.Airport.0.Local_LocalAirportConditions.2',
+        'Config.1.Travel.0.Fcst_DaypartForecast.0',
+        'Config.1.Ski.0.Fcst_DaypartForecast.0',
+        'Config.1.Traffic.0.Local_PackageIntro.0',
+        'Config.1.Health.0.Cc_LongCurrentConditions.0',
+        'Config.1.International.0.Local_InternationalDestinations.3',
+        'Config.1.International.0.Cc_LongCurrentConditions.0',
+        'Config.1.Core1.0.Cc_LongCurrentConditions.0',
+        'Config.1.Core3.0.Cc_LongCurrentConditions.0',
+        'Config.1.Cc_ShortCurrentConditions.0',
+        'Config.1.Core3.0.Local_WeatherBulletin.0',
+        'Config.1.CityTicker_LocalCitiesCurrentConditions.0',
+        'Config.1.Fcst_DaypartForecast.0',
+        'Config.1.SevereCore1B.0.Cc_ShortCurrentConditions.0',
+        'Config.1.SevereCore1B.0.Local_SevereWeatherMessage.0',
+        'Config.1.SevereCore1B.0.Local_CurrentConditions.0',
+        'Config.1.Core1.0.Local_TextForecast.0',
+        'Config.1.Core3.0.Local_CurrentConditions.0',
+        'Config.1.Core2.0.Fcst_DaypartForecast.0',
+        'Config.1.Garden.0.Local_Promo.0',
+        'Config.1.Traffic.0.Cc_ShortCurrentConditions.0',
+        'Config.1.SevereCore2.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Core1.0.Fcst_ExtendedForecast.0',
+        'Config.1.Core1.0.Local_MenuBoard.0',
+        'Config.1.Core2.0.Local_CurrentConditions.0',
+        'Config.1.SevereCore2.0.Local_WeatherBulletin.0',
+        'Config.1.Core2.0.Fcst_ExtendedForecast.0',
+        'Config.1.Core4.0.Local_WeatherBulletin.0',
+        'Config.1.Core3.0.Cc_ShortCurrentConditions.0',
+        'Config.1.International.0.Fcst_ExtendedForecast.0',
+        'Config.1.Travel.0.Fcst_ExtendedForecast.0',
+        'Config.1.SevereCore1A.0.Fcst_DaypartForecast.0',
+        'Config.1.Fcst_TextForecast.0',
+        'Config.1.Airport.0.Local_PackageIntro.0',
+        'Config.1.Health.0.Local_Promo.0',
+        'Config.1.Core4.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Airport.0.Cc_LongCurrentConditions.0',
+        'Config.1.International.0.Local_PackageIntro.0',
+        'Config.1.Core5.0.Fcst_DaypartForecast.0',
+        'Config.1.Ski.0.Local_SkiConditions.2',
+        'Config.1.Core4.0.Fcst_ExtendedForecast.0',
+        'Config.1.Health.0.Local_HealthForecast.0',
+        'Config.1.CityTicker_TravelCitiesForecast.0',
+        'Config.1.SevereCore1B.0.Local_ExtendedForecast.0',
+        'Config.1.Core4.0.Fcst_TextForecast.0',
+        'Config.1.Garden.0.Fcst_TextForecast.0',
+        'Config.1.SevereCore2.0.Fcst_ExtendedForecast.0',
+        'Config.1.Core3.0.Local_TextForecast.0',
+        'Config.1.Airport.0.Fcst_TextForecast.0',
+        'Config.1.Airport.0.Local_LocalAirportConditions.0',
+        'Config.1.SevereCore1B.0.Fcst_DaypartForecast.0',
+        'Config.1.SevereCore1B.0.Local_WeatherBulletin.0',
+        'Config.1.Core1.0.Local_CurrentConditions.0',
+        'Config.1.SevereCore1A.0.Local_WeatherBulletin.0',
+        'Config.1.Core4.0.Local_DaypartForecast.0',
+        'Config.1.Health.0.Local_PackageIntro.0',
+        'Config.1.Health.0.Local_OutdoorActivityForecast.0',
+        'Config.1.SevereCore2.0.Fcst_TextForecast.0',
+        'Config.1.Core4.0.Cc_LongCurrentConditions.0',
+        'Config.1.Core3.0.Local_MenuBoard.0',
+        'Config.1.Core5.0.Fcst_ExtendedForecast.0',
+        'Config.1.Core2.0.Fcst_TextForecast.0',
+        'Config.1.Core2.0.Local_ExtendedForecast.0',
+        'Config.1.SevereCore1A.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Ski.0.Local_SkiConditions.3',
+        'Config.1.SevereCore1A.0.Local_TextForecast.0',
+        'Config.1.Garden.0.Fcst_ExtendedForecast.0',
+        'Config.1.Ski.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Core2.0.Local_MenuBoard.0',
+        'Config.1.Health.0.Fcst_ExtendedForecast.0',
+        'Config.1.International.0.Local_InternationalDestinations.1',
+        'Config.1.SevereCore1A.0.Local_ExtendedForecast.0',
+        'Config.1.International.0.Local_InternationalDestinations.4',
+        'Config.1.Core1.0.Local_Almanac.0',
+        'Config.1.International.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Airport.0.Local_LocalAirportConditions.3',
+        'Config.1.Traffic.0.Local_TrafficOverview.0',
+        'Config.1.SevereCore2.0.Cc_LongCurrentConditions.0',
+        'Config.1.Health.0.Local_AllergyReport.0',
+        'Config.1.SevereCore1A.0.Local_LocalObservations.0',
+        'Config.1.Core2.0.Cc_LongCurrentConditions.0',
+        'Config.1.SevereCore1A.0.Fcst_TextForecast.0',
+        'Config.1.Core5.0.Fcst_TextForecast.0',
+        'Config.1.Ski.0.Local_SunSafetyFacts.0',
+        'Config.1.SevereCore1A.0.Cc_LongCurrentConditions.0',
+        'Config.1.Core2.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Core1.0.Fcst_TextForecast.0',
+        'Config.1.Core5.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Travel.0.Local_Destinations.1',
+        'Config.1.Cc_LongCurrentConditions.0',
+        'Config.1.CityTicker_LocalCitiesForecast.0',
+        'Config.1.Travel.0.Cc_LongCurrentConditions.0',
+        'Config.1.Traffic.0.SmLocal_TrafficSponsor.0',
+        'Config.1.Ski.0.Local_PackageIntro.0',
+        'Config.1.Ski.0.Fcst_TextForecast.0',
+        'Config.1.Garden.0.Cc_LongCurrentConditions.0',
+        'Config.1.Travel.0.Local_Destinations.0',
+        'Config.1.Garden.0.Local_PackageIntro.0',
+        'Config.1.CityTicker_TravelCitiesCurrentConditions.0',
+        'Config.1.International.0.Local_InternationalDestinations.0',
+        'Config.1.Airport.0.Local_NationalAirportConditions.3',
+        'Config.1.Core1.0.Local_WeatherBulletin.0',
+        'Config.1.Traffic.0.Cc_LongCurrentConditions.0',
+        'Config.1.Health.0.Local_SunSafetyFacts.1',
+        'Config.1.International.0.Fcst_DaypartForecast.0',
+        'Config.1.Core1.0.Local_LocalObservations.1',
+        'Config.1.Airport.0.Local_NationalAirportConditions.2',
+        'Config.1.SevereCore1A.0.Fcst_ExtendedForecast.0',
+        'Config.1.Core2.0.Local_WeatherBulletin.0',
+        'Config.1.International.0.Fcst_TextForecast.0',
+        'Config.1.Ski.0.Local_SkiConditions.1',
+        'Config.1.Fcst_ExtendedForecast.0',
+        'Config.1.SevereCore1B.0.Local_DaypartForecast.0',
+        'Config.1.Travel.0.Local_PackageIntro.0',
+        'Config.1.International.0.Local_InternationalDestinations.2',
+        'Config.1.SevereCore1A.0.Local_SevereWeatherMessage.0',
+        'Config.1.Garden.0.Local_GardeningForecast.0',
+        'Config.1.Core3.0.Fcst_TextForecast.0',
+        'Config.1.SevereCore1B.0.Cc_LongCurrentConditions.0',
+        'Config.1.Travel.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Ski.0.Fcst_ExtendedForecast.0',
+        'Config.1.Core3.0.Fcst_ExtendedForecast.0',
+        'Config.1.International.0.Local_InternationalDestinations.5',
+        'Config.1.Travel.0.Local_Destinations.2',
+        'Config.1.SevereCore2.0.Fcst_DaypartForecast.0',
+        'Config.1.Airport.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Health.0.Local_UltravioletIndex.0',
+        'Config.1.Garden.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Core1.0.Cc_ShortCurrentConditions.0',
+        'Config.1.Core1.0.Local_NetworkIntro.0',
+        'Config.1.Core1.0.Local_ExtendedForecast.0',
+        'Config.1.Health.0.Local_AirQualityForecast.0',
+        'Config.1.Core4.0.Local_ExtendedForecast.0',
+        'Config.1.SevereCore1B.0.Fcst_TextForecast.0',
+        'Config.1.SevereCore1A.0.Local_LocalObservations.1',
+        'Config.1.Health.0.Fcst_TextForecast.0',
+        'Config.1.Core1.0.Fcst_DaypartForecast.0',
+        'Config.1.Traffic.0.Fcst_DaypartForecast.0',
+        'Config.1.Health.0.Fcst_DaypartForecast.0',
+        'Config.1.Core4.0.Local_MenuBoard.0',
+        'Config.1.Ski.0',
+    ]
     
-    lines = [f"scmtRemove('{product}')" for product in products]
+    lines = [f"scmtRemove('{product}')" for product in (domestic_products if system_type == "domestic" else weatherscan_products)]
     return "\n".join(lines)
 
 
@@ -1557,7 +1745,6 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
     sections.append(f"# SCMT Configuration File for IntelliStar 1 {system_type.capitalize()}")
     sections.append("# Generated by IntelliStar Config Generator by @sspwxr (raii)")
     sections.append("#")
-    sections.append(f"wxdata.setTimeZone('{get_timezone_by_location_id(all_records[0].loc_id)}')")
     sections.append("#")
     sections.append(secret_hehe)
     sections.append("#")
@@ -1573,8 +1760,14 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
     sections.append("#")
     sections.append("# Beginning of SCMT deployment")
     sections.append("import os")
-    sections.append("dsm.set('scmt_configType', 'domestic',0)")
-    sections.append("dsm.set('scmt.ProductTypes',['Animated_Logo_Sponsor','Copy_Split','Custom','Logo_Sponsor', 'Dealer'], 0)")
+    if system_type == "domestic":
+        sections.append(f"dsm.set('scmt_configType', 'domestic',0)")
+        sections.append("dsm.set('scmt.ProductTypes',['Animated_Logo_Sponsor','Copy_Split','Custom','Logo_Sponsor', 'Dealer'], 0)")
+    if system_type == "weatherscan":
+        sections.append(f"dsm.set('scmt_configType', 'wxscan',0)")
+        sections.append("dsm.set('scmt.ProductTypes',['None'], 0)")
+    sections.append("#")
+    sections.append(f"wxdata.setTimeZone('{get_timezone_by_location_id(all_records[0].loc_id)}')")
     sections.append("#")
     if system_type == "domestic":
         sections.append(compile_i1_map_data(config, all_records))
@@ -1588,7 +1781,7 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
         sections.append("#")
         sections.append(compile_i1_vocal_schedule())
         sections.append("#")
-        sections.append(compile_i1_scmt_removes())
+        sections.append(compile_i1_scmt_removes(system_type="domestic"))
         sections.append("#")
         sections.append(compile_i1_non_image_maps())
         sections.append("#")
@@ -1602,6 +1795,7 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
         sections.append(compile_i1_travel_forecast(config, all_records))
         sections.append("#")
     if system_type == "weatherscan":
+        sections.append(compile_i1_scmt_removes(system_type="weatherscan"))
         sections.append(compile_i1_map_data(config, all_records, "weatherscan"))
         sections.append("#")
         sections.append(compile_i1_interest_list(config, "weatherscan"))
