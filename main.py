@@ -433,6 +433,7 @@ class AggregatedConfig:
     zone_ids: list[str] = field(default_factory=list)
     county_ids: list[str] = field(default_factory=list)
     county_names: dict[str, str] = field(default_factory=dict)
+    obs_stations: list[str] = field(default_factory=list)
     climate_ids: list[str] = field(default_factory=list)
     airport_ids: list[str] = field(default_factory=list)
     name: str = ""
@@ -456,6 +457,10 @@ class AggregatedConfig:
         for tecci in record.teccis:
             if tecci not in self.tecci_ids:
                 self.tecci_ids.append(tecci)
+        
+        for obs in (record.obs_station,):
+            if obs and obs not in self.obs_stations:
+                self.obs_stations.append(obs)
 
         if record.zone_id and record.zone_id not in self.zone_ids:
             self.zone_ids.append(record.zone_id)
@@ -698,7 +703,6 @@ def get_cityticker_obs_stations(state_code: str, country_code: str) -> list[str]
         # Only Monterrey has TECCI
         return ['MMMX', 'MMGL', 'T76393000', 'MMTJ', 'MMUN', 'MMPR']
     else:
-        # US regions - TECCIs from LFRecord where available
         if state_code in southeast_us:
             # Atlanta, Miami, Orlando, Nashville, Charlotte, New Orleans
             return ['T72219029', 'T72202000', 'T72205000', 'T72327008', 'T72314004', 'T72231015']
@@ -728,20 +732,20 @@ def get_cityticker_obs_stations(state_code: str, country_code: str) -> list[str]
 def compile_i1_interest_list(config: AggregatedConfig, system_type: str = "domestic") -> str:
     
     if system_type == "weatherscan":
-        # International coop IDs for Canada and Mexico forecasts (static)
+
         intl_coop_ids = [
-            # Canada
+
             '71182000', '71627001', '71852000', '71879001', '71892001', '71913000', '71936000', '71966000',
-            # Mexico
+
             '76255000', '76393000', '76405000', '76595000', '76679001',
         ]
         
-        # CityTicker obsStation IDs based on region
+
         cityticker_obs = get_cityticker_obs_stations(config.state_code, config.country_code)
         
-        # Combine all coop IDs
+
         all_coop_ids = list(config.coop_ids) + intl_coop_ids
-        # Combine all obsStation IDs
+
         all_obs_ids = list(config.tecci_ids) + cityticker_obs
         
         output_interest_list = f"""wxdata.setInterestList('airportId','1',[{quote_list(config.airport_ids) if config.airport_ids else ''}])
@@ -759,7 +763,7 @@ wxdata.setInterestList('county','1',[{quote_list(config.county_ids)}])"""
 wxdata.setInterestList('coopId','1',[{quote_list(config.coop_ids)}])
 wxdata.setInterestList('indexId','1',[''])
 #wxdata.setInterestList('pollenId','1',[])
-wxdata.setInterestList('obsStation','1',[{quote_list(config.tecci_ids)}])
+wxdata.setInterestList('obsStation','1',[{quote_list(config.tecci_ids + config.obs_stations)}])
 wxdata.setInterestList('climId','1',[{quote_list(config.climate_ids)}])
 wxdata.setInterestList('zone','1',[{quote_list(config.zone_ids)}])
 #wxdata.setInterestList('aq','1',[])
@@ -771,6 +775,12 @@ wxdata.setInterestList('county','1',[{quote_list(config.county_ids)}])"""
 def compile_i1_currentconditions(config: AggregatedConfig, all_records: list[LocationRecord], system_type: str = "domestic") -> str:
     loc_name = config.name
     loc_names = [record.name for record in all_records[:2]]
+    obs_stations_for_current = []
+    for record in all_records:
+        if record.teccis and record.teccis[0]:
+            obs_stations_for_current.append(record.teccis[0])
+        elif record.obs_station:
+            obs_stations_for_current.append(record.obs_station)
     
     if system_type == "weatherscan":
         # Get travel cities based on country
@@ -778,19 +788,19 @@ def compile_i1_currentconditions(config: AggregatedConfig, all_records: list[Loc
         
         # Weatherscan uses different current conditions products
         output_current_conditions = f"""d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
 d.locName = [{quote_list(loc_names)}]
 d.elementDurationShort = 6
 dsm.set('Config.1.Cc_ShortCurrentConditions.0', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
 d.locName = [{quote_list(loc_names)}]
 d.elementDurationLong = 6
 dsm.set('Config.1.Cc_LongCurrentConditions.0', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
 d.locName = [{quote_list(loc_names)}]
 dsm.set('Config.1.Core1.0.Local_CurrentConditions.0', d, 0, 1)
 dsm.set('Config.1.Core2.0.Local_CurrentConditions.0', d, 0, 1)
@@ -800,34 +810,34 @@ dsm.set('Config.1.SevereCore1A.0.Local_CurrentConditions.0', d, 0, 1)
 dsm.set('Config.1.SevereCore1B.0.Local_CurrentConditions.0', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:4])}]
+d.obsStation = [{quote_list(obs_stations_for_current[:4])}]
 d.locName = [{quote_list([record.name for record in all_records[:4]])}]
 dsm.set('Config.1.SevereCore1A.0.Local_LocalObservations.0', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[4:8]) if len(config.tecci_ids) > 4 else quote_list(config.tecci_ids[:4])}]
+d.obsStation = [{quote_list(obs_stations_for_current[4:8]) if len(obs_stations_for_current) > 4 else quote_list(obs_stations_for_current[:4])}]
 d.locName = [{quote_list([record.name for record in all_records[4:8]]) if len(all_records) > 4 else quote_list([record.name for record in all_records[:4]])}]
 dsm.set('Config.1.SevereCore1A.0.Local_LocalObservations.1', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:4])}]
+d.obsStation = [{quote_list(obs_stations_for_current[:4])}]
 d.locName = [{quote_list([record.name for record in all_records[:4]])}]
 dsm.set('Config.1.Core1.0.Local_LocalObservations.0', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[4:8]) if len(config.tecci_ids) > 4 else quote_list(config.tecci_ids[:4])}]
+d.obsStation = [{quote_list(obs_stations_for_current[4:8]) if len(obs_stations_for_current) > 4 else quote_list(obs_stations_for_current[:4])}]
 d.locName = [{quote_list([record.name for record in all_records[4:8]]) if len(all_records) > 4 else quote_list([record.name for record in all_records[:4]])}]
 dsm.set('Config.1.Core1.0.Local_LocalObservations.1', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:10])}]
+d.obsStation = [{quote_list(obs_stations_for_current[:10])}]
 d.locName = [{quote_list([record.name for record in all_records[:10]])}]
 dsm.set('Config.1.CityTicker_LocalCitiesCurrentConditions.0', d, 0, 1)
 #
 """ + get_cityticker_travel_cities(config.state_code, config.country_code) + f"""
 #
 d = twc.Data()
-d.obsStation = '{config.tecci_ids[0] if config.tecci_ids else ""}'
+d.obsStation = '{obs_stations_for_current[0] if obs_stations_for_current else ""}'
 d.locName = '{loc_name}'
 d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
 dsm.set('Config.1.Health.0.Local_UltravioletIndex.0', d, 0, 1)
@@ -842,20 +852,20 @@ dsm.set('Config.1.Core1.0.Local_Almanac.0', d, 0, 1)"""
     else:
         # Domestic IntelliStar
         output_current_conditions = f"""d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
-d.locName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
+d.locName = [{quote_list([loc_name, loc_name][:len(obs_stations_for_current[:2])])}]
 d.elementDuration = 6
 dsm.set('Config.1.Cc_CurrentConditions', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
-d.locName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
+d.locName = [{quote_list([loc_name, loc_name][:len(obs_stations_for_current[:2])])}]
 d.activeVocalCue = 1
 d.activeVocal = 1
 dsm.set('Config.1.Local_CurrentConditions', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
 d.schedule = [((11,22,16,0,0), (11,24,16,0,0)),((12,15,16,0,0), (1,5,16,0,0)),((5,18,16,0,0), (9,3,16,0,0)),]
 d.coopId = '{config.coop_ids[0] if config.coop_ids else ""}'
 dsm.set('Config.1.Local_SchoolDayWeather', d, 0, 1)
@@ -867,14 +877,14 @@ d.longitude = {config.lon}
 dsm.set('Config.1.Ldl_SunriseSunset', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
 d.timeDuration = 5
 d.tempDuration = 8
 dsm.set('Config.1.TimeTemp_Default', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
-d.obsLocName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
+d.obsLocName = [{quote_list([loc_name, loc_name][:len(obs_stations_for_current[:2])])}]
 dsm.set('Config.1.Ldl_CurrentApparentTemp', d, 0, 1)
 #
 ds.commit()
@@ -889,12 +899,12 @@ dsm.set('Config.1.Ldl_CurrentVisibility', d, 0, 1)
 dsm.set('Config.1.Ldl_CurrentWinds', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:2]) if config.tecci_ids else ""}]
-d.obsLocName = [{quote_list([loc_name, loc_name][:len(config.tecci_ids[:2])])}]
+d.obsStation = [{quote_list(obs_stations_for_current[:2])}]
+d.obsLocName = [{quote_list([loc_name, loc_name][:len(obs_stations_for_current[:2])])}]
 dsm.set('Config.1.Ldl_CurrentMTDPrecip', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = '{config.tecci_ids[0] if config.tecci_ids else ""}'
+d.obsStation = '{obs_stations_for_current[0] if obs_stations_for_current else ""}'
 d.climId = ['{config.climate_ids[0] if config.climate_ids else ""}']
 d.latitude = {config.lat}
 d.longitude = {config.lon}
@@ -909,7 +919,7 @@ d.longitude = {config.lon}
 dsm.set('Config.1.Local_Almanac', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids)}]
+d.obsStation = [{quote_list(obs_stations_for_current)}]
 d.climId = ['{config.climate_ids[0] if config.climate_ids else ""}']
 d.latitude = {config.lat}
 d.longitude = {config.lon}
@@ -920,7 +930,7 @@ d.fcstLowOffset = 0
 dsm.set('Config.1.Local_RecordHighLow', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = '{config.tecci_ids[0] if config.tecci_ids else ""}'
+d.obsStation = '{obs_stations_for_current[0] if obs_stations_for_current else ""}'
 d.locName = '{loc_name.upper()}'
 d.heatIndexThreshold = 102
 dsm.set('Config.1.Local_HeatSafetyTips', d, 0, 1)
@@ -944,7 +954,7 @@ d.displayMessage = 1
 dsm.set('Config.1.Ldl_NationalStarIDMessage', d, 0, 1)
 #
 d = twc.Data()
-d.obsStation = [{quote_list(config.tecci_ids[:8])}]
+d.obsStation = [{quote_list(obs_stations_for_current[:8])}]
 d.locName = [{quote_list([record.name for record in all_records[:8]])}]
 dsm.set('Config.1.Local_LocalObservations', d, 0, 1)
 #
@@ -2184,7 +2194,7 @@ def main() -> None:
         except (ValueError, TypeError):
             main_lon = None
 
-    nearby = prompt_for_nearby_locations(max_nearby=8)
+    nearby = prompt_for_nearby_locations(max_nearby=7)
     
     print(f"\nNearby locations entered: {len(nearby)}")
     for record in nearby:
@@ -2230,6 +2240,7 @@ def main() -> None:
         all_records.append(record)
         config.add_record(record)
         print(f"  TECCIs: {record.teccis}")
+        print(f"  OBS STATION: {record.obs_station}")
         print(f"  Coop ID: {record.coop_id}")
         print(f"  Zone ID: {record.zone_id}")
         print(f"  Airport ID: {record.airport_id}")
@@ -2241,6 +2252,7 @@ def main() -> None:
     print(f"Airport IDs: {config.airport_ids}")
     print(f"Coop IDs: {config.coop_ids}")
     print(f"TECCI IDs: {config.tecci_ids}")
+    print(f"OBS STATION IDs: {config.obs_stations}")
     print(f"Zone IDs: {config.zone_ids}")
     print(f"County IDs: {config.county_ids}")
     print(f"Climate IDs: {config.climate_ids}")
