@@ -381,6 +381,7 @@ class LocationRecord:
     obs_station: str | None = None
     state_code: str | None = None
     country_code: str | None = None
+    full_time_zone: str = ""
     lat: float | None = None
     lon: float | None = None
 
@@ -417,6 +418,7 @@ class LocationRecord:
             obs_station=record.get("obsStn"),
             state_code=record.get("stCd"),
             country_code=record.get("cntryCd"),
+            full_time_zone=record.get("tmZnNm", ""),
             lat=lat,
             lon=lon,
         )
@@ -428,6 +430,8 @@ def quote_list(items: list[str]) -> str:
 @dataclass
 class AggregatedConfig:
     """Aggregated configuration data from all locations."""
+    location_id: str = ""
+    nearby_location_ids: list[str] = field(default_factory=list)
     coop_ids: list[str] = field(default_factory=list)
     tecci_ids: list[str] = field(default_factory=list)
     zone_ids: list[str] = field(default_factory=list)
@@ -436,6 +440,7 @@ class AggregatedConfig:
     obs_stations: list[str] = field(default_factory=list)
     climate_ids: list[str] = field(default_factory=list)
     airport_ids: list[str] = field(default_factory=list)
+    full_time_zone: str = ""
     name: str = ""
     state_code: str = ""
     country_code: str = ""
@@ -444,6 +449,12 @@ class AggregatedConfig:
 
     def add_record(self, record: LocationRecord) -> None:
         """Add a location record's data to the aggregated config."""
+
+        if not self.location_id:
+            self.location_id = record.loc_id
+
+        if record.loc_id and record.loc_id not in self.nearby_location_ids:
+            self.nearby_location_ids.append(record.loc_id)
 
         if not self.state_code and record.state_code:
             self.state_code = record.state_code
@@ -464,6 +475,9 @@ class AggregatedConfig:
 
         if record.zone_id and record.zone_id not in self.zone_ids:
             self.zone_ids.append(record.zone_id)
+
+        if record.full_time_zone and not self.full_time_zone:
+            self.full_time_zone = record.full_time_zone
 
         if record.county_id and record.county_id not in self.county_ids:
             self.county_ids.append(record.county_id)
@@ -487,7 +501,6 @@ def get_cityticker_travel_cities(state_code: str, country_code: str) -> str:
     
     Maps states/provinces to regions and returns appropriate travel cities.
     """
-    # Define region mappings
     southeast_us = ['FL', 'GA', 'AL', 'MS', 'LA', 'SC', 'NC', 'TN', 'KY', 'VA', 'WV', 'AR']
     northeast_us = ['NY', 'NJ', 'PA', 'CT', 'MA', 'RI', 'NH', 'VT', 'ME', 'DE', 'MD', 'DC']
     midwest_us = ['OH', 'MI', 'IN', 'IL', 'WI', 'MN', 'IA', 'MO', 'ND', 'SD', 'NE', 'KS']
@@ -496,7 +509,6 @@ def get_cityticker_travel_cities(state_code: str, country_code: str) -> str:
     northwest_us = ['WA', 'OR', 'ID', 'MT', 'WY']
     rocky_mountain = ['CO', 'UT', 'NV']
     
-    # Canadian regions
     maritimes = ['NS', 'NB', 'PE', 'NL']
     quebec = ['QC']
     ontario = ['ON']
@@ -546,7 +558,6 @@ d.locName = ['Montreal','Quebec City','Val-d\\'Or','St. Hubert','Mirabel','Rouyn
 d.coopId = ['71627000','71714000','71725000','71371000','71626000','71733000',]
 dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
         else:
-            # Default Canada (Ontario and territories)
             return """d = twc.Data()
 d.obsStation = ['T71437008','CYUL','CYVR','T71300001','CYYC','T71579003',]
 d.locName = ['Toronto','Montreal','Vancouver','Ottawa','Calgary','Winnipeg',]
@@ -557,7 +568,6 @@ d.locName = ['Toronto','Montreal','Vancouver','Ottawa','Calgary','Winnipeg',]
 d.coopId = ['71624000','71627000','71892000','71628000','71877000','71852000',]
 dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
     else:
-        # US regions
         if state_code in southeast_us:
             return """d = twc.Data()
 d.obsStation = ['T72219029','T72202000','T72205000','T72327008','T72314004','T72231015',]
@@ -629,7 +639,6 @@ d.locName = ['Denver','Salt Lake City','Las Vegas','Colorado Springs','Grand Jun
 d.coopId = ['72565003','72572024','72386023','72566093','72576093','72564003',]
 dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
         elif country_code == "US":
-            # Default US (general national cities)
             return """d = twc.Data()
 d.obsStation = ['T72503193','T72295000','T72530000','T72259000','T72469009','T72219029',]
 d.locName = ['New York','Los Angeles','Chicago','Dallas','Denver','Atlanta',]
@@ -640,7 +649,6 @@ d.locName = ['New York','Los Angeles','Chicago','Dallas','Denver','Atlanta',]
 d.coopId = ['72503094','72295000','72530094','72258053','72565003','72219013',]
 dsm.set('Config.1.CityTicker_TravelCitiesForecast.0', d, 0, 1)"""
         elif country_code == "MX":
-            # Mexico travel cities (only Monterrey has TECCI)
             return """d = twc.Data()
 d.obsStation = ['MMMX','MMGL','T76393000','MMTJ','MMUN','MMPR',]
 d.locName = ['Mexico City','Guadalajara','Monterrey','Tijuana','Cancun','Puerto Vallarta',]
@@ -1128,7 +1136,7 @@ dsm.set('Config.1.Ldl_SummaryForecast', d, 0, 1)
 """
     return output_forecast
 
-def compile_i1_metadata(config: AggregatedConfig, system_type: str = "domestic") -> str:
+def compile_i1_metadata(config: AggregatedConfig, system_type: str = "domestic") -> str | list[str | int]:
     """Generate metadata configuration settings."""
     county_list = [(cid, cname) for cid, cname in config.county_names.items()]
     county_list_str = str(county_list) if county_list else "[]"
@@ -1213,6 +1221,8 @@ dsm.set('Config.1.SevereClock','scmt_severe.clock', 0)
 dsm.set('headendId','{random_star_id}', 0)
 
 dsm.set('countryCode','{config.country_code}', 0)"""
+    if system_type == "randomId":
+        return [random_cable_name, random_star_id]
     return output_metadata
 
 def compile_i1_airport_data(config: AggregatedConfig, all_records: list[LocationRecord]) -> str:
@@ -1751,84 +1761,254 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
         import base64
         secret_hehe = base64.b64decode("I+KghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghOKghAoj4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCE4qCECg==").decode('utf-8')
     
-    sections.append(f"# Created on {start_time}")
-    sections.append(f"# SCMT Configuration File for IntelliStar 1 {system_type.capitalize()}")
-    sections.append("# Generated by IntelliStar Config Generator by @sspwxr (raii)")
-    sections.append("#")
-    sections.append("#")
-    sections.append(secret_hehe)
-    sections.append("#")
-    sections.append("Log.info('scmt config started')")
-    sections.append("#")
-    sections.append("def scmtRemove(key):")
-    sections.append("    try:")
-    sections.append("        dsm.remove(key)")
-    sections.append("    except:")
-    sections.append("        pass")
-    sections.append("#")
-    sections.append("")
-    sections.append("#")
-    sections.append("# Beginning of SCMT deployment")
-    sections.append("import os")
-    if system_type == "domestic":
-        sections.append(f"dsm.set('scmt_configType', 'domestic',0)")
-        sections.append("dsm.set('scmt.ProductTypes',['Animated_Logo_Sponsor','Copy_Split','Custom','Logo_Sponsor', 'Dealer'], 0)")
-    if system_type == "weatherscan":
-        sections.append(f"dsm.set('scmt_configType', 'wxscan',0)")
-        sections.append("dsm.set('scmt.ProductTypes',['None'], 0)")
-    sections.append("#")
-    sections.append(f"wxdata.setTimeZone('{get_timezone_by_location_id(all_records[0].loc_id)}')")
-    sections.append("#")
-    if system_type == "domestic":
-        sections.append(compile_i1_map_data(config, all_records))
-        sections.append("#")
-        sections.append(compile_i1_interest_list(config, "domestic"))
-        sections.append(compile_i1_metadata(config, "domestic"))
-        sections.append("#")
-        sections.append(compile_i1_airport_data(config, all_records))
-        sections.append("#")
-        sections.append(compile_i1_bulletin_override())
-        sections.append("#")
-        sections.append(compile_i1_vocal_schedule())
-        sections.append("#")
-        sections.append(compile_i1_scmt_removes(system_type="domestic"))
-        sections.append("#")
-        sections.append(compile_i1_non_image_maps())
+    if system_type in ["domestic", "weatherscan"]:
+        sections.append(f"# Created on {start_time}")
+        sections.append(f"# SCMT Configuration File for IntelliStar 1 {system_type.capitalize()}")
+        sections.append("# Generated by IntelliStar Config Generator by @sspwxr (raii)")
         sections.append("#")
         sections.append("#")
-        sections.append(compile_i1_currentconditions(config, all_records, "domestic"))
+        sections.append(secret_hehe)
         sections.append("#")
-        sections.append(compile_i1_forecast(config, "domestic"))
+        sections.append("Log.info('scmt config started')")
         sections.append("#")
-        sections.append(compile_i1_airport_delays(config, all_records))
+        sections.append("def scmtRemove(key):")
+        sections.append("    try:")
+        sections.append("        dsm.remove(key)")
+        sections.append("    except:")
+        sections.append("        pass")
         sections.append("#")
-        sections.append(compile_i1_travel_forecast(config, all_records))
+        sections.append("")
         sections.append("#")
-    if system_type == "weatherscan":
-        sections.append(compile_i1_scmt_removes(system_type="weatherscan"))
-        sections.append(compile_i1_map_data(config, all_records, "weatherscan"))
+        sections.append("# Beginning of SCMT deployment")
+        sections.append("import os")
+        if system_type == "domestic":
+            sections.append(f"dsm.set('scmt_configType', 'domestic',0)")
+            sections.append("dsm.set('scmt.ProductTypes',['Animated_Logo_Sponsor','Copy_Split','Custom','Logo_Sponsor', 'Dealer'], 0)")
+        if system_type == "weatherscan":
+            sections.append(f"dsm.set('scmt_configType', 'wxscan',0)")
+            sections.append("dsm.set('scmt.ProductTypes',['None'], 0)")
         sections.append("#")
-        sections.append(compile_i1_interest_list(config, "weatherscan"))
-        sections.append(compile_i1_metadata(config, "weatherscan"))
+        sections.append(f"wxdata.setTimeZone('{get_timezone_by_location_id(all_records[0].loc_id)}')")
         sections.append("#")
-        sections.append(compile_wxscan_airport_data(config, all_records))
-        sections.append("#")
-        sections.append(compile_i1_bulletin_override())
-        sections.append("#")
-        sections.append(compile_i1_vocal_schedule())
-        sections.append("#")
-        sections.append(compile_wxscan_packages(config))
-        sections.append("#")
-        sections.append(compile_i1_currentconditions(config, all_records, "weatherscan"))
-        sections.append("#")
-        sections.append(compile_i1_forecast(config, "weatherscan"))
-        sections.append("#")
-        sections.append(compile_i1_travel_forecast(config, all_records))
-        sections.append("#")
-    
-    end_time = datetime.now().strftime("%a %b %d %H:%M:%S %Z %Y")
-    sections.append("Log.info('scmt config completed')")
-    sections.append(f"# Finished generation on {end_time}")
+        if system_type == "domestic":
+            sections.append(compile_i1_map_data(config, all_records))
+            sections.append("#")
+            sections.append(compile_i1_interest_list(config, "domestic"))
+            sections.append(compile_i1_metadata(config, "domestic"))
+            sections.append("#")
+            sections.append(compile_i1_airport_data(config, all_records))
+            sections.append("#")
+            sections.append(compile_i1_bulletin_override())
+            sections.append("#")
+            sections.append(compile_i1_vocal_schedule())
+            sections.append("#")
+            sections.append(compile_i1_scmt_removes(system_type="domestic"))
+            sections.append("#")
+            sections.append(compile_i1_non_image_maps())
+            sections.append("#")
+            sections.append("#")
+            sections.append(compile_i1_currentconditions(config, all_records, "domestic"))
+            sections.append("#")
+            sections.append(compile_i1_forecast(config, "domestic"))
+            sections.append("#")
+            sections.append(compile_i1_airport_delays(config, all_records))
+            sections.append("#")
+            sections.append(compile_i1_travel_forecast(config, all_records))
+            sections.append("#")
+        if system_type == "weatherscan":
+            sections.append(compile_i1_scmt_removes(system_type="weatherscan"))
+            sections.append(compile_i1_map_data(config, all_records, "weatherscan"))
+            sections.append("#")
+            sections.append(compile_i1_interest_list(config, "weatherscan"))
+            sections.append(compile_i1_metadata(config, "weatherscan"))
+            sections.append("#")
+            sections.append(compile_wxscan_airport_data(config, all_records))
+            sections.append("#")
+            sections.append(compile_i1_bulletin_override())
+            sections.append("#")
+            sections.append(compile_i1_vocal_schedule())
+            sections.append("#")
+            sections.append(compile_wxscan_packages(config))
+            sections.append("#")
+            sections.append(compile_i1_currentconditions(config, all_records, "weatherscan"))
+            sections.append("#")
+            sections.append(compile_i1_forecast(config, "weatherscan"))
+            sections.append("#")
+            sections.append(compile_i1_travel_forecast(config, all_records))
+            sections.append("#")
+        
+        end_time = datetime.now().strftime("%a %b %d %H:%M:%S %Z %Y")
+        sections.append("Log.info('scmt config completed')")
+        sections.append(f"# Finished generation on {end_time}")
+    if system_type == "i2":
+        sections.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+        sections.append("<Config>")
+        sections.append("  <ConfigDef>")
+        sections.append("    <ConfigItems>")
+        sections.append("      <ConfigItem key=\"AffiliateLogoId\" value=\"domestic\\affiliateLogos\\BlankLogo.tif\" />")
+        sections.append("      <ConfigItem key=\"AffiliateText1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"AffiliateText2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport1_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport1_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport2_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport2_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport3\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport3_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"Airport3_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"AreaServed\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"AuthorizationCode\" value=\"y\" />")
+        sections.append(f"      <ConfigItem key=\"AuthorizationDate\" value=\"{datetime.now().strftime('%m')}/{datetime.now().strftime('%d')}/{datetime.now().strftime('%Y')}\" />")
+        sections.append("      <ConfigItem key=\"BeachLocation\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"BeachLocation_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"BeachLocation_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"ChannelId\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"ChannelNumber\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"ChannelText\" value=\"\" />")
+        sections.append(f"      <ConfigItem key=\"CityName\" value=\"{config.name}\" />")
+        sections.append("      <ConfigItem key=\"ConnectMethod\" value=\"\" />")
+        sections.append(f"      <ConfigItem key=\"CountryCode\" value=\"{config.country_code}\" />")
+        sections.append("      <ConfigItem key=\"DataFromHeadendNb\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"disableLocalization\" value=\"False\" />")
+        sections.append("      <ConfigItem key=\"disableLOCL\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"DisplayLogoFlag\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"DmaCode\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"DmaName\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"ExternalIpAddress\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"FedFromHeadend\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"FedFromHeadendName\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"FrontChannelGateway\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"FrontChannelIpAddress\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"FrontChannelNetMask\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"GatewayAddress\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"HeadendAddress\" value=\"\" />")
+        random_metadata = compile_i1_metadata(config, "randomId")
+        random_star_id = random_metadata[1] if isinstance(random_metadata, list) else "000000"
+        sections.append(f"      <ConfigItem key=\"HeadendId\" value=\"{random_star_id}\" />")
+        sections.append(f"      <ConfigItem key=\"HeadendName\" value=\"HD XD - {config.name} - HD XD\" />")
+        sections.append("      <ConfigItem key=\"LocalDns1Address\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"LocalDns2Address\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"LocalIpAddress\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"LocalOcmMkt\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"LogoCd\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"LogoDescription\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"MsoCode\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"MsoName\" value=\"\" />")
+        i2_loc_product_config = [
+            "NearbyLocation",
+            "RegionalMapCity",
+            "LocalRadarCity",
+            "MapCity",
+            "MetroMapCity"
+        ]
+        for product in i2_loc_product_config:
+            for i in range(1, 9):
+                if i - 1 < len(config.nearby_location_ids):
+                    loc = config.nearby_location_ids[i - 1]
+                    nearby_value = f"1_{config.country_code}_{loc}"
+                else:
+                    nearby_value = ""
+                sections.append(f"      <ConfigItem key=\"{product}{i}\" value=\"{nearby_value}\" />")
+                sections.append(f"      <ConfigItem key=\"{product}{i}_1\" value=\"\" />")
+                sections.append(f"      <ConfigItem key=\"{product}{i}_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"NetMask\" value=\"255.255.255.0\" />")
+        sections.append("      <ConfigItem key=\"OcmOn8CityCode\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"OcmOn8DataPid\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"OcmOn8Enabled\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"OcmOn8MsgIngesterMulticastIpAddress\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"OcmOn8MsgIngesterMulticastPort\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"OnAirName\" value=\"\" />")
+        sections.append(f"      <ConfigItem key=\"PrimaryLatitudeLongitude\" value=\"W{config.lon}-N{config.lat}\" />")
+        sections.append("      <ConfigItem key=\"PrimaryLatitudeLongitude_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"PrimaryLatitudeLongitude_2\" value=\"\" />")
+        sections.append(f"      <ConfigItem key=\"PrimaryLocation\" value=\"{config.location_id}\" />")
+        sections.append("      <ConfigItem key=\"PrimaryLocation_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"PrimaryLocation_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"primaryMarineZone\" value=\"\" />")
+        sections.append(f"      <ConfigItem key=\"primaryCounty\" value=\"{config.county_ids[0]}\" />")
+        sections.append(f"      <ConfigItem key=\"primaryZone\" value=\"{config.zone_ids[0]}\" />")
+        sections.append("      <ConfigItem key=\"PrimaryWMO\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"RadioLogo\" value=\"domestic\\radioLogos\\NationalLogo_Dma_County.tif\" />")
+        sections.append(f"      <ConfigItem key=\"secondaryCounties\" value=\"{','.join(config.county_ids[1:])}\" />")
+        sections.append(f"      <ConfigItem key=\"secondaryZones\" value=\"{','.join(config.zone_ids[1:])}\" />")
+        sections.append("      <ConfigItem key=\"serialNumber\" value=\"XD00000\" />")
+        sections.append("      <ConfigItem key=\"Service\" value=\"\" />")
+        sections.append("      sections.append(f\"      <ConfigItem key=\\\"StateCode\\\" value=\\\"{config.state_code}\\\" />\")")
+        sections.append("      <ConfigItem key=\"StatesServed\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation1_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation1_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation2_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation2_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation3\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation3_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SummerGetawayLocation3_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"SystemId\" value=\"\" />")
+        sections.append(f"      <ConfigItem key=\"SystemName\" value=\"{config.name}\" />")
+        sections.append("      <ConfigItem key=\"TerminationDate\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation1_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation1_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation2_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation2_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation3\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation3_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation3_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation4\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation4_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation4_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation5\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation5_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation5_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation6\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation6_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation6_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation7\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation7_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation7_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation8\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation8_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TideStation8_2\" value=\"\" />")
+        sections.append(f"      <ConfigItem key=\"timeZone\" value=\"{config.full_time_zone}\" />")
+        sections.append("      <ConfigItem key=\"TrafficIncidentPrimaryRadius\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TrafficIncidentSecondaryRadius\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TrafficKeyRoute1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TrafficKeyRoute2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TrafficKeyRoute3\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TrafficKeyRoute4\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TrafficKeyRoute5\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TrafficKeyRoute6\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity1_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity1_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity2_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity2_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity3\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity3_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity3_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity4\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity4_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity4_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity5\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity5_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"TravelCity5_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation1_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation1_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation2_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation2_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation3\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation3_1\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"WinterGetawayLocation3_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"ZipCode\" value=\"\" />")
+        sections.append("    </ConfigItems>")
+        sections.append("  </ConfigDef>")
+        sections.append("</Config>")
     
     return "\n".join(sections)
 
@@ -2157,13 +2337,17 @@ def main() -> None:
     print("\nSelect the system type to generate a config for:")
     print("  1. Domestic IntelliStar")
     print("  2. Weatherscan IntelliStar")
+    print("  3. IntelliStar 2")
     while True:
         system_choice = input("Enter choice (1 or 2): ").strip()
         if system_choice == "1":
             system_type = "domestic"
             break
-        elif system_choice == "2":
+        if system_choice == "2":
             system_type = "weatherscan"
+            break
+        if system_choice == "3":
+            system_type = "i2"
             break
         else:
             print("Invalid choice. Please enter 1 or 2.")
@@ -2264,11 +2448,16 @@ def main() -> None:
         print("=" * 60)
         full_config = compile_full_config(config, all_records, system_type="domestic")
         output_filename = f"output/{config.name.replace(' ', '_').replace('/', '_')}_i1_config.py"
-    else:
+    if system_type == "weatherscan":
         print(f"WEATHERSCAN INTELLISTAR CONFIG GENERATED FOR {config.name.upper()}")
         print("=" * 60)
         full_config = compile_full_config(config, all_records, system_type="weatherscan")
         output_filename = f"output/{config.name.replace(' ', '_').replace('/', '_')}_wxscan_config.py"
+    if system_type == "i2":
+        print(f"INTELLISTAR 2 CONFIG GENERATED FOR {config.name.upper()}")
+        print("=" * 60)
+        full_config = compile_full_config(config, all_records, system_type="i2")
+        output_filename = f"output/{config.name.replace(' ', '_').replace('/', '_')}_i2_config.xml"
     
     Path("output").mkdir(exist_ok=True)
     
