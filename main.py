@@ -1934,7 +1934,7 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
         sections.append(f"      <ConfigItem key=\"secondaryZones\" value=\"{','.join(config.zone_ids[1:])}\" />")
         sections.append("      <ConfigItem key=\"serialNumber\" value=\"XD00000\" />")
         sections.append("      <ConfigItem key=\"Service\" value=\"\" />")
-        sections.append("      sections.append(f\"      <ConfigItem key=\\\"StateCode\\\" value=\\\"{config.state_code}\\\" />\")")
+        sections.append(f"      <ConfigItem key=\"StateCode\" value=\"{config.state_code}\" />")
         sections.append("      <ConfigItem key=\"StatesServed\" value=\"\" />")
         sections.append("      <ConfigItem key=\"SummerGetawayLocation1\" value=\"\" />")
         sections.append("      <ConfigItem key=\"SummerGetawayLocation1_1\" value=\"\" />")
