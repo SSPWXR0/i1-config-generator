@@ -1,6 +1,6 @@
 # IntelliStar Config Generator
 
-Generates SCMT configuration files for the domestic IntelliStar system for anywhere in the U.S., Canada, or Mexico.
+Generates SCMT or XML configuration files for the IntelliStar series of systems for anywhere in the U.S., Canada, or Mexico.
 
 ## Requirements
 
@@ -25,9 +25,14 @@ Config files are generated in `output/` directory.
 
 ## Deployment
 
-Copy the .py file from the output directory onto your IntelliStar's /home/dgadmin/config/current directory. Load the config via
+### IntelliStar 1 Weatherscan/Domestic:
+
+Copy the .py file from the output directory onto your IntelliStar's `/home/dgadmin/config/current` directory. Load the config via
 ``` runomni /twc/util/loadSCMTconfig.pyc /home/dgadmin/config/current/config.py```
+
+### IntelliStar 2 HD/Jr/xD:
+Copy the .xml file from the output directory onto `C:\Program Files (x86)\TWC\I2\Managed\Config\MachineProductCfg.xml`. Keep the name "MachineProductCfg.xml".
 
 ## Contributing
 
-This program is in a very primitive state as of writing. Contributions are always welcome. Please make a pull request for the changes you would like to add.
+Contributions are always welcome. Please make a pull request for the changes you would like to add.
