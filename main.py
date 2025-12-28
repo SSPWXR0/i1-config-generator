@@ -1939,7 +1939,7 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
         sections.append("      <ConfigItem key=\"OcmOn8MsgIngesterMulticastIpAddress\" value=\"\" />")
         sections.append("      <ConfigItem key=\"OcmOn8MsgIngesterMulticastPort\" value=\"\" />")
         sections.append("      <ConfigItem key=\"OnAirName\" value=\"\" />")
-        sections.append(f"      <ConfigItem key=\"PrimaryLatitudeLongitude\" value=\"W{config.lon}-N{config.lat}\" />")
+        sections.append(f"      <ConfigItem key=\"PrimaryLatitudeLongitude\" value=\"W{abs(config.lon)}-N{config.lat}\" />")
         sections.append("      <ConfigItem key=\"PrimaryLatitudeLongitude_1\" value=\"\" />")
         sections.append("      <ConfigItem key=\"PrimaryLatitudeLongitude_2\" value=\"\" />")
         sections.append(f"      <ConfigItem key=\"PrimaryLocation\" value=\"1_{config.country_code}_{config.location_id}\" />")
