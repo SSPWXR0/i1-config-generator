@@ -1891,27 +1891,47 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
         sections.append("      <ConfigItem key=\"LocalDns2Address\" value=\"\" />")
         sections.append("      <ConfigItem key=\"LocalIpAddress\" value=\"\" />")
         sections.append("      <ConfigItem key=\"LocalOcmMkt\" value=\"\" />")
+        for i in range(1, 9):
+            if i - 1 < len(config.nearby_location_ids):
+                loc = config.nearby_location_ids[i - 1]
+                nearby_value = f"1_{config.country_code}_{loc}"
+            else:
+                nearby_value = ""
+            sections.append(f"      <ConfigItem key=\"LocalRadarCity{i}\" value=\"{nearby_value}\" />")
+            sections.append(f"      <ConfigItem key=\"LocalRadarCity{i}_1\" value=\"\" />")
+            sections.append(f"      <ConfigItem key=\"LocalRadarCity{i}_2\" value=\"\" />")
         sections.append("      <ConfigItem key=\"LogoCd\" value=\"\" />")
         sections.append("      <ConfigItem key=\"LogoDescription\" value=\"\" />")
-        sections.append("      <ConfigItem key=\"MsoCode\" value=\"\" />")
-        sections.append("      <ConfigItem key=\"MsoName\" value=\"\" />")
-        i2_loc_product_config = [
-            "NearbyLocation",
-            "RegionalMapCity",
-            "LocalRadarCity",
-            "MapCity",
-            "MetroMapCity"
-        ]
-        for product in i2_loc_product_config:
-            for i in range(1, 9):
-                if i - 1 < len(config.nearby_location_ids):
-                    loc = config.nearby_location_ids[i - 1]
-                    nearby_value = f"1_{config.country_code}_{loc}"
-                else:
-                    nearby_value = ""
-                sections.append(f"      <ConfigItem key=\"{product}{i}\" value=\"{nearby_value}\" />")
-                sections.append(f"      <ConfigItem key=\"{product}{i}_1\" value=\"\" />")
-                sections.append(f"      <ConfigItem key=\"{product}{i}_2\" value=\"\" />")
+        for i in range(1, 9):
+            if i - 1 < len(config.nearby_location_ids):
+                loc = config.nearby_location_ids[i - 1]
+                nearby_value = f"1_{config.country_code}_{loc}"
+            else:
+                nearby_value = ""
+            sections.append(f"      <ConfigItem key=\"MapCity{i}\" value=\"{nearby_value}\" />")
+            sections.append(f"      <ConfigItem key=\"MapCity{i}_1\" value=\"\" />")
+            sections.append(f"      <ConfigItem key=\"MapCity{i}_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"MasterUnitAddress\" value=\"\" />")
+        for i in range(1, 9):
+            if i - 1 < len(config.nearby_location_ids):
+                loc = config.nearby_location_ids[i - 1]
+                nearby_value = f"1_{config.country_code}_{loc}"
+            else:
+                nearby_value = ""
+            sections.append(f"      <ConfigItem key=\"MetroMapCity{i}\" value=\"{nearby_value}\" />")
+            sections.append(f"      <ConfigItem key=\"MetroMapCity{i}_1\" value=\"\" />")
+            sections.append(f"      <ConfigItem key=\"MetroMapCity{i}_2\" value=\"\" />")
+        sections.append("      <ConfigItem key=\"MsoCode\" value=\"00000\" />")
+        sections.append(f"      <ConfigItem key=\"MsoName\" value=\"{compile_i1_metadata(config, system_type="randomIds")[0]}\" />")
+        for i in range(1, 9):
+            if i - 1 < len(config.nearby_location_ids):
+                loc = config.nearby_location_ids[i - 1]
+                nearby_value = f"1_{config.country_code}_{loc}"
+            else:
+                nearby_value = ""
+            sections.append(f"      <ConfigItem key=\"NearbyLocation{i}\" value=\"{nearby_value}\" />")
+            sections.append(f"      <ConfigItem key=\"NearbyLocation{i}_1\" value=\"\" />")
+            sections.append(f"      <ConfigItem key=\"NearbyLocation{i}_2\" value=\"\" />")
         sections.append("      <ConfigItem key=\"NetMask\" value=\"255.255.255.0\" />")
         sections.append("      <ConfigItem key=\"OcmOn8CityCode\" value=\"\" />")
         sections.append("      <ConfigItem key=\"OcmOn8DataPid\" value=\"\" />")
@@ -1922,7 +1942,7 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
         sections.append(f"      <ConfigItem key=\"PrimaryLatitudeLongitude\" value=\"W{config.lon}-N{config.lat}\" />")
         sections.append("      <ConfigItem key=\"PrimaryLatitudeLongitude_1\" value=\"\" />")
         sections.append("      <ConfigItem key=\"PrimaryLatitudeLongitude_2\" value=\"\" />")
-        sections.append(f"      <ConfigItem key=\"PrimaryLocation\" value=\"{config.location_id}\" />")
+        sections.append(f"      <ConfigItem key=\"PrimaryLocation\" value=\"1_{config.country_code}_{config.location_id}\" />")
         sections.append("      <ConfigItem key=\"PrimaryLocation_1\" value=\"\" />")
         sections.append("      <ConfigItem key=\"PrimaryLocation_2\" value=\"\" />")
         sections.append("      <ConfigItem key=\"primaryMarineZone\" value=\"\" />")
@@ -1930,6 +1950,15 @@ def compile_full_config(config: AggregatedConfig, all_records: list[LocationReco
         sections.append(f"      <ConfigItem key=\"primaryZone\" value=\"{config.zone_ids[0]}\" />")
         sections.append("      <ConfigItem key=\"PrimaryWMO\" value=\"\" />")
         sections.append("      <ConfigItem key=\"RadioLogo\" value=\"domestic\\radioLogos\\NationalLogo_Dma_County.tif\" />")
+        for i in range(1, 9):
+            if i - 1 < len(config.nearby_location_ids):
+                loc = config.nearby_location_ids[i - 1]
+                nearby_value = f"1_{config.country_code}_{loc}"
+            else:
+                nearby_value = ""
+            sections.append(f"      <ConfigItem key=\"RegionalMapCity1{i}\" value=\"{nearby_value}\" />")
+            sections.append(f"      <ConfigItem key=\"RegionalMapCity1{i}_1\" value=\"\" />")
+            sections.append(f"      <ConfigItem key=\"RegionalMapCity1{i}_2\" value=\"\" />")
         sections.append(f"      <ConfigItem key=\"secondaryCounties\" value=\"{','.join(config.county_ids[1:])}\" />")
         sections.append(f"      <ConfigItem key=\"secondaryZones\" value=\"{','.join(config.zone_ids[1:])}\" />")
         sections.append("      <ConfigItem key=\"serialNumber\" value=\"XD00000\" />")
