@@ -31,7 +31,7 @@ Copy the .py file from the output directory onto your IntelliStar's `/home/dgadm
 ``` runomni /twc/util/loadSCMTconfig.pyc /home/dgadmin/config/current/config.py```
 
 ### IntelliStar 2 HD/Jr/xD:
-Copy the .xml file from the output directory onto `C:\Program Files (x86)\TWC\I2\Managed\Config\MachineProductCfg.xml`. Keep the name "MachineProductCfg.xml".
+Copy the .xml file from the output directory into `C:\Program Files (x86)\TWC\I2\Managed\Config\MachineProductCfg.xml`. Keep the name "MachineProductCfg.xml".
 
 ## Contributing
 
