@@ -1,0 +1,444 @@
+{
+    "weatherscan": {
+        "calibration_data": {
+            "Harrison": {
+                "latLonCoordinates": [
+                    36.2297,
+                    -93.1077
+                ]
+            },
+            "Dallas": {
+                "latLonCoordinates": [
+                    32.7767,
+                    -96.797
+                ]
+            },
+            "Wolf Point": {
+                "latLonCoordinates": [
+                    48.0906,
+                    -105.6406
+                ]
+            },
+            "Niagara Falls": {
+                "latLonCoordinates": [
+                    43.1153,
+                    -78.9864
+                ]
+            },
+            "Portland": {
+                "latLonCoordinates": [
+                    45.5152,
+                    -122.6784
+                ]
+            },
+            "Kansas City": {
+                "latLonCoordinates": [
+                    39.0997,
+                    -94.5786
+                ]
+            },
+            "Leesburg": {
+                "latLonCoordinates": [
+                    28.8108,
+                    -81.8779
+                ]
+            },
+            "Seattle": {
+                "latLonCoordinates": [
+                    47.6061,
+                    -122.3328
+                ]
+            }
+        },
+        "Local_LocalDoppler": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    19931,
+                    9334
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    19931,
+                    9334
+                ]
+            },
+            "Portland": {
+                "mapCutCoordinates": [
+                    4443,
+                    15085
+                ]
+            },
+            "Wolf Point": {
+                "mapCutCoordinates": [
+                    13085,
+                    16614
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    21869,
+                    14164
+                ]
+            },
+            "Kansas City": {
+                "mapCutCoordinates": [
+                    19618,
+                    11040
+                ]
+            },
+            "Leesburg": {
+                "mapCutCoordinates": [
+                    26421,
+                    5024
+                ]
+            },
+            "Seattle": {
+                "mapCutCoordinates": [
+                    4665,
+                    16572
+                ]
+            }
+        },
+        "Local_RegionalForecastConditions": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    12019,
+                    10668
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    12019,
+                    10668
+                ]
+            },
+            "Portland": {
+                "mapCutCoordinates": [
+                    3252,
+                    13068
+                ]
+            },
+            "Wolf Point": {
+                "mapCutCoordinates": [
+                    2728,
+                    8907
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    17939,
+                    10087
+                ]
+            },
+            "Kansas City": {
+                "mapCutCoordinates": [
+                    13200,
+                    6700
+                ]
+            },
+            "Leesburg": {
+                "mapCutCoordinates": [
+                    19916,
+                    3490
+                ]
+            },
+            "Seattle": {
+                "mapCutCoordinates": [
+                    3335,
+                    14583
+                ]
+            }
+        },
+        "Local_RadarSatelliteComposite": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    3190,
+                    1873
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    3190,
+                    1873
+                ]
+            },
+            "Portland": {
+                "mapCutCoordinates": [
+                    1463,
+                    1827
+                ]
+            },
+            "Wolf Point": {
+                "mapCutCoordinates": [
+                    2303,
+                    1596
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    3563,
+                    1858
+                ]
+            },
+            "Kansas City": {
+                "mapCutCoordinates": [
+                    3092,
+                    1284
+                ]
+            },
+            "Leesburg": {
+                "mapCutCoordinates": [
+                    3617,
+                    704
+                ]
+            },
+            "Seattle": {
+                "mapCutCoordinates": [
+                    1463,
+                    1827
+                ]
+            }
+        },
+        "Local_FrostFreezeWarnings": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            }
+        },
+        "Local_SnowfallQpfForecast": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Portland": {
+                "mapCutCoordinates": [
+                    1996,
+                    1960
+                ]
+            },
+            "Wolf Point": {
+                "mapCutCoordinates": [
+                    1819,
+                    1562
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Kansas City": {
+                "mapCutCoordinates": [
+                    3247,
+                    1393
+                ]
+            },
+            "Seattle": {
+                "mapCutCoordinates": [
+                    2073,
+                    2064
+                ]
+            }
+        },
+        "Local_NationalTravelWeather": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    1451,
+                    293
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    1451,
+                    293
+                ]
+            },
+            "Portland": {
+                "mapCutCoordinates": [
+                    1451,
+                    293
+                ]
+            },
+            "Wolf Point": {
+                "mapCutCoordinates": [
+                    1451,
+                    293
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    1451,
+                    293
+                ]
+            },
+            "Kansas City": {
+                "mapCutCoordinates": [
+                    1451,
+                    293
+                ]
+            },
+            "Leesburg": {
+                "mapCutCoordinates": [
+                    1451,
+                    293
+                ]
+            },
+            "Seattle": {
+                "mapCutCoordinates": [
+                    1451,
+                    293
+                ]
+            }
+        },
+        "Local_EstimatedPrecipitation": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    3426,
+                    1172
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    3426,
+                    1172
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            }
+        },
+        "Local_PrecipitationQpfForecast": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            }
+        },
+        "Local_PalmerDroughtSeverity": {
+            "Harrison": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Dallas": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    3073,
+                    1467
+                ]
+            }
+        },
+        "Radar_LocalDoppler": {
+            "Dallas": {
+                "mapCutCoordinates": [
+                    18151,
+                    8806
+                ]
+            },
+            "Harrison": {
+                "mapCutCoordinates": [
+                    18151,
+                    8806
+                ]
+            },
+            "Portland": {
+                "mapCutCoordinates": [
+                    4438,
+                    15176
+                ]
+            },
+            "Wolf Point": {
+                "mapCutCoordinates": [
+                    12790,
+                    16756
+                ]
+            },
+            "Niagara Falls": {
+                "mapCutCoordinates": [
+                    22625,
+                    14961
+                ]
+            },
+            "Kansas City": {
+                "mapCutCoordinates": [
+                    19140,
+                    11130
+                ]
+            },
+            "Leesburg": {
+                "mapCutCoordinates": [
+                    26190,
+                    5277
+                ]
+            },
+            "Seattle": {
+                "mapCutCoordinates": [
+                    2870,
+                    16052
+                ]
+            }
+        },
+        "Local_RegionalGolfIndexForecast": {
+            "Kansas City": {
+                "mapCutCoordinates": [
+                    3654,
+                    1568
+                ]
+            }
+        },
+        "Local_CurrentWaterTemperatures": {
+            "Seattle": {
+                "mapCutCoordinates": [
+                    1879,
+                    2031
+                ]
+            }
+        }
+    }
+}

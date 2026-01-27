@@ -1,0 +1,133 @@
+userLocaleInput:
+  locations:
+    mainLocation:
+      applicable: # the systems on which this location set can be used.
+        - i1_domestic
+        - i1_domesticWATT
+        - i1_weatherscan
+        - i2_domestic
+      name: Saskatoon # Primary location name. Used on all systems as the default location for weather presentations.
+      state: SK
+
+    nearbyLocations:
+      applicable:
+        - i1_domestic
+        - i1_domesticWATT
+        - i1_weatherscan
+        - i2_domestic
+      locations: # Secondary nearby locations for weather presentations. On all I1 systems except WATT, these are displayed in a list after the main current conditions and on the LDL.
+      # on all systems with WATT, these are used on the Lower Display Line.
+        - name: Warman
+          state: SK
+        - name: Prince Albert
+          state: SK
+        - name: Melfort
+          state: SK
+        - name: Yorkton
+          state: SK
+        - name: North Battleford
+          state: SK
+        - name: Lloydminster
+          state: AB
+        - name: Humboldt
+          state: SK
+        - name: Outlook
+          state: SK
+    MapCities:
+      applicable:
+        - i2_domestic
+      reuseNearbyLocations: false # If true, uses the nearby locations as the cities shown on the map display. If false, uses the specified locations below.
+      locations: # Cities to be shown on the map display.
+        - name: Martensville
+          state: SK
+        - name: Outlook
+          state: SK
+        - name: North Battleford
+          state: SK
+        - name: Lloydminster
+          state: AB
+        - name: Prince Albert
+          state: SK
+        - name: Regina Beach
+          state: SK
+        - name: Dundurn
+          state: SK
+        - name: Watrous
+          state: SK
+    MetroMapCities:
+      applicable:
+        - i2_domestic
+      reuseNearbyLocations: false # If true, uses the nearby locations as the cities shown on the metro map display. If false, uses the specified locations below.
+      locations: # Cities to be shown on the metro map display.
+        - name: Warman
+          state: SK
+        - name: Martensville
+          state: SK
+        - name: Biggar
+          state: SK
+        - name: Osler
+          state: SK
+        - name: Langham
+          state: SK
+        - name: Hague
+          state: SK
+        - name: Rosthern
+          state: SK
+        - name: Vanscoy
+          state: SK
+    RegionalMapCities:
+      applicable:
+        - i2_domestic
+      reuseNearbyLocations: false # If true, uses the nearby locations as the cities shown on the regional map display. If false, uses the specified locations below.
+      locations: # Cities to be shown on the regional map display.
+        - name: North Battleford
+          state: SK
+        - name: Lloydminster
+          state: AB
+        - name: Prince Albert
+          state: SK
+        - name: Yorkton
+          state: SK
+        - name: Melfort
+          state: SK
+        - name: Humboldt
+          state: SK
+        - name: Melville
+          state: SK
+        - name: Tisdale
+          state: SK
+    SummerGetawayLocations: # no one has gotten these to work lol. max 3.
+      applicable:
+        - i2_domestic
+      reuseNearbyLocations: false
+      locations: []
+
+    WinterGetawayLocations: # no one has gotten these to work lol. max 3.
+      applicable:
+        - i2_domestic
+      reuseNearbyLocations: false
+      locations: []
+
+    airportLocations: # no one has gotten these to work lol
+      applicable:
+        - i1_domestic
+        - i1_domesticWATT
+        - i2_domestic
+      locations: []
+
+    travelDestinations: # no one has gotten these to work lol
+      applicable:
+        - i1_domesticWATT
+        - i1_domestic
+      locations:
+        - name: Edmonton
+          state: AB
+        - name: Calgary
+          state: AB
+        - name: Vancouver
+          state: BC
+
+    snowboardLocations: # no one has gotten these to work lol
+      applicable:
+        - i1_domestic
+      locations: []

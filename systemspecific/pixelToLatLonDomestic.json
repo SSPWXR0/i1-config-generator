@@ -1,0 +1,1010 @@
+{
+    "image_sizes": {
+        "radar-us": {
+            "mercator.us.se.tif": [
+                19178,
+                10500
+            ],
+            "mercator.us.sw.tif": [
+                19703,
+                10500
+            ],
+            "mercator.us.nw.tif": [
+                19703,
+                10366
+            ],
+            "mercator.us.ne.tif": [
+                19178,
+                10366
+            ]
+        },
+        "radar-cb": {
+            "mercator.cb.local.tif": [
+                4611,
+                3200
+            ],
+            "mercator.cb.regional.tif": [
+                2640,
+                2082
+            ],
+            "lambert.carribbean.tif": [
+                720,
+                486
+            ]
+        },
+        "radar-ak": {
+            "mercator.ak.regional.tif": [
+                3010,
+                4495
+            ],
+            "mercator.ak.local.tif": [
+                5487,
+                4716
+            ]
+        },
+        "radar-hi": {
+            "mercator.hi.local.tif": [
+                3740,
+                2335
+            ],
+            "mercator.hi.regional.tif": [
+                3012,
+                1871
+            ]
+        }
+    },
+    "domestic": {
+        "calibration_data": {
+            "Flat Rock": {
+                "latLonCoordinates": [
+                    39.36388,
+                    -85.825
+                ]
+            },
+            "Riverside-Moreno Valley-Perris": {
+                "latLonCoordinates": [
+                    33.79499,
+                    -117.21833
+                ]
+            },
+            "Duluth": {
+                "latLonCoordinates": [
+                    46.76583,
+                    -92.11889
+                ]
+            },
+            "Aberdeen": {
+                "latLonCoordinates": [
+                    46.97167,
+                    -123.82278
+                ]
+            },
+            "West Chester-Coatesville Areas": {
+                "latLonCoordinates": [
+                    40.02333,
+                    -75.81278
+                ]
+            },
+            "Modesto": {
+                "latLonCoordinates": [
+                    37.6575,
+                    -121.01945
+                ]
+            },
+            "Nashua": {
+                "latLonCoordinates": [
+                    42.70833,
+                    -71.46139
+                ]
+            },
+            "Grand Prairie Area": {
+                "latLonCoordinates": [
+                    32.72805,
+                    -97.01361
+                ]
+            },
+            "Gainesville": {
+                "latLonCoordinates": [
+                    34.03054,
+                    -83.67833
+                ]
+            }
+        },
+        "map_products": {
+            "Radar_LocalDoppler": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        24552,
+                        11436
+                    ]
+                },
+                "Riverside-Moreno Valley-Perris": {
+                    "mapCutCoordinates": [
+                        7524,
+                        8334
+                    ]
+                },
+                "Duluth": {
+                    "mapCutCoordinates": [
+                        21138,
+                        16026
+                    ]
+                },
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3942,
+                        16164
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        30036,
+                        11814
+                    ]
+                },
+                "Modesto": {
+                    "mapCutCoordinates": [
+                        5466,
+                        10452
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        32340,
+                        13446
+                    ]
+                },
+                "Grand Prairie Area": {
+                    "mapCutCoordinates": [
+                        18486,
+                        7728
+                    ]
+                },
+                "Gainesville": {
+                    "mapCutCoordinates": [
+                        25650,
+                        8460
+                    ]
+                }
+            },
+            "Local_MetroDopplerRadar": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        24853,
+                        11426
+                    ]
+                },
+                "Riverside-Moreno Valley-Perris": {
+                    "mapCutCoordinates": [
+                        7752,
+                        8276
+                    ]
+                },
+                "Duluth": {
+                    "mapCutCoordinates": [
+                        21366,
+                        15966
+                    ]
+                },
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        4172,
+                        16104
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        30266,
+                        11754
+                    ]
+                },
+                "Modesto": {
+                    "mapCutCoordinates": [
+                        5692,
+                        10394
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        32570,
+                        13384
+                    ]
+                },
+                "Grand Prairie Area": {
+                    "mapCutCoordinates": [
+                        18712,
+                        7666
+                    ]
+                },
+                "Gainesville": {
+                    "mapCutCoordinates": [
+                        25880,
+                        8400
+                    ]
+                }
+            },
+            "Local_MetroForecastMap": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        24790,
+                        11382
+                    ]
+                },
+                "Riverside-Moreno Valley-Perris": {
+                    "mapCutCoordinates": [
+                        8050,
+                        8475
+                    ]
+                },
+                "Duluth": {
+                    "mapCutCoordinates": [
+                        21362,
+                        15855
+                    ]
+                },
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        4327,
+                        16084
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        30216,
+                        11730
+                    ]
+                },
+                "Modesto": {
+                    "mapCutCoordinates": [
+                        5859,
+                        10491
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        32476,
+                        13563
+                    ]
+                },
+                "Grand Prairie Area": {
+                    "mapCutCoordinates": [
+                        19077,
+                        8010
+                    ]
+                },
+                "Gainesville": {
+                    "mapCutCoordinates": [
+                        25990,
+                        8533
+                    ]
+                }
+            },
+            "Local_MetroObservationMap": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        24790,
+                        11382
+                    ]
+                },
+                "Riverside-Moreno Valley-Perris": {
+                    "mapCutCoordinates": [
+                        8050,
+                        8475
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        30216,
+                        11730
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        32476,
+                        13563
+                    ]
+                },
+                "Grand Prairie Area": {
+                    "mapCutCoordinates": [
+                        19077,
+                        8010
+                    ]
+                }
+            },
+            "Local_RadarSatelliteComposite": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        3870,
+                        1645
+                    ]
+                },
+                "Duluth": {
+                    "mapCutCoordinates": [
+                        3312,
+                        1972
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        4186,
+                        1672
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        4698,
+                        2124
+                    ]
+                },
+                "Grand Prairie Area": {
+                    "mapCutCoordinates": [
+                        2769,
+                        731
+                    ]
+                },
+                "Gainesville": {
+                    "mapCutCoordinates": [
+                        3982,
+                        1115
+                    ]
+                }
+            },
+            "Local_RegionalDopplerRadar": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        23774,
+                        10709
+                    ]
+                },
+                "Riverside-Moreno Valley-Perris": {
+                    "mapCutCoordinates": [
+                        6912,
+                        7715
+                    ]
+                },
+                "Duluth": {
+                    "mapCutCoordinates": [
+                        20523,
+                        15403
+                    ]
+                },
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3328,
+                        15542
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        29366,
+                        11203
+                    ]
+                },
+                "Modesto": {
+                    "mapCutCoordinates": [
+                        4851,
+                        9832
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        31726,
+                        12821
+                    ]
+                },
+                "Grand Prairie Area": {
+                    "mapCutCoordinates": [
+                        17868,
+                        7103
+                    ]
+                },
+                "Gainesville": {
+                    "mapCutCoordinates": [
+                        25100,
+                        7810
+                    ]
+                }
+            },
+            "Local_RegionalForecastMap": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        21868,
+                        10159
+                    ]
+                },
+                "Riverside-Moreno Valley-Perris": {
+                    "mapCutCoordinates": [
+                        5072,
+                        7192
+                    ]
+                },
+                "Duluth": {
+                    "mapCutCoordinates": [
+                        19322,
+                        14190
+                    ]
+                },
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3053,
+                        14740
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        27630,
+                        10314
+                    ]
+                },
+                "Modesto": {
+                    "mapCutCoordinates": [
+                        4512,
+                        9114
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        31084,
+                        12606
+                    ]
+                },
+                "Grand Prairie Area": {
+                    "mapCutCoordinates": [
+                        16173,
+                        6193
+                    ]
+                },
+                "Gainesville": {
+                    "mapCutCoordinates": [
+                        23875,
+                        7091
+                    ]
+                }
+            },
+            "Local_RegionalObservationMap": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        21868,
+                        10159
+                    ]
+                },
+                "Riverside-Moreno Valley-Perris": {
+                    "mapCutCoordinates": [
+                        5072,
+                        7192
+                    ]
+                },
+                "Duluth": {
+                    "mapCutCoordinates": [
+                        19322,
+                        14190
+                    ]
+                },
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3053,
+                        14740
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        27630,
+                        10314
+                    ]
+                },
+                "Modesto": {
+                    "mapCutCoordinates": [
+                        4512,
+                        9114
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        31084,
+                        12606
+                    ]
+                },
+                "Grand Prairie Area": {
+                    "mapCutCoordinates": [
+                        16173,
+                        6193
+                    ]
+                },
+                "Gainesville": {
+                    "mapCutCoordinates": [
+                        23875,
+                        7091
+                    ]
+                }
+            },
+            "Local_Satellite": {
+                "Riverside-Moreno Valley-Perris": {
+                    "mapCutCoordinates": [
+                        1879,
+                        1114
+                    ]
+                },
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        861,
+                        1634
+                    ]
+                },
+                "West Chester-Coatesville Areas": {
+                    "mapCutCoordinates": [
+                        4477,
+                        1265
+                    ]
+                },
+                "Modesto": {
+                    "mapCutCoordinates": [
+                        1497,
+                        1257
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        4471,
+                        1491
+                    ]
+                }
+            },
+            "NationalLdl_DopplerRadar": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        24711,
+                        11438
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        32493,
+                        13445
+                    ]
+                }
+            },
+            "NationalLdl_RadarSatellite": {
+                "Flat Rock": {
+                    "mapCutCoordinates": [
+                        3823,
+                        1587
+                    ]
+                },
+                "Nashua": {
+                    "mapCutCoordinates": [
+                        4649,
+                        2111
+                    ]
+                }
+            }
+        }
+    },
+    "domesticWATT": {
+        "calibration_data": {
+            "Aberdeen": {
+                "latLonCoordinates": [
+                    46.97167,
+                    -123.82278
+                ]
+            },
+            "Minneapolis": {
+                "latLonCoordinates": [
+                    45.02166,
+                    -93.14027
+                ]
+            },
+            "Miami": {
+                "latLonCoordinates": [
+                    26.12194,
+                    -80.14361
+                ]
+            },
+            "Salem": {
+                "latLonCoordinates": [
+                    44.985,
+                    -123.14139
+                ]
+            },
+            "Dallas": {
+                "latLonCoordinates": [
+                    32.605,
+                    -96.76167
+                ]
+            }
+        },
+        "map_products": {
+            "Radar_LocalDoppler": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3942,
+                        16164
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        20677,
+                        14936
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        27869,
+                        4388
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        4314,
+                        14874
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        18127,
+                        7533
+                    ]
+                }
+            },
+            "Local_MetroDopplerRadar": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        4172,
+                        16104
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        20884,
+                        14882
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        28040,
+                        4343
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        4613,
+                        14861
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        18791,
+                        7651
+                    ]
+                }
+            },
+            "Local_MetroForecastMap": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        4364,
+                        16107
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        21135,
+                        15053
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        28138,
+                        4422
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        4595,
+                        14836
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        18977,
+                        7940
+                    ]
+                }
+            },
+            "Local_MetroObservationMap": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        4364,
+                        16107
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        21135,
+                        15053
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        28138,
+                        4422
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        4595,
+                        14836
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        18977,
+                        7940
+                    ]
+                }
+            },
+            "Local_MetroRadarFS": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        4225,
+                        16316
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        20930,
+                        15073
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        28078,
+                        4501
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        4659,
+                        15052
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        18849,
+                        7889
+                    ]
+                }
+            },
+            "Local_RadarSatelliteComposite": {
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        3312,
+                        1972
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        4131,
+                        710
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        2769,
+                        731
+                    ]
+                }
+            },
+            "Local_RegionalDopplerRadar": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3388,
+                        15307
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        19800,
+                        14160
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        27018,
+                        3675
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        3533,
+                        14141
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        18045,
+                        7150
+                    ]
+                }
+            },
+            "Local_RegionalForecastMap": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3053,
+                        14740
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        18432,
+                        13293
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        25124,
+                        3101
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        3750,
+                        13502
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        16173,
+                        6193
+                    ]
+                }
+            },
+            "Local_RegionalObservationMap": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3053,
+                        14740
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        18432,
+                        13293
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        25124,
+                        3101
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        3750,
+                        13502
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        16173,
+                        6193
+                    ]
+                }
+            },
+            "Local_RegionalRadarFS": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        3532,
+                        15891
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        19928,
+                        14666
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        27133,
+                        4137
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        3657,
+                        14649
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        18160,
+                        7608
+                    ]
+                }
+            },
+            "Local_Satellite": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        861,
+                        1634
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        4282,
+                        201
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        861,
+                        1634
+                    ]
+                }
+            },
+            "Local_SummaryFS": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        4290,
+                        16296
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        20993,
+                        15054
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        28131,
+                        4489
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        4665,
+                        15013
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        18672,
+                        7846
+                    ]
+                }
+            },
+            "LFLocal_LocalDoppler": {
+                "Aberdeen": {
+                    "mapCutCoordinates": [
+                        4030,
+                        16235
+                    ]
+                },
+                "Minneapolis": {
+                    "mapCutCoordinates": [
+                        20756,
+                        15000
+                    ]
+                },
+                "Miami": {
+                    "mapCutCoordinates": [
+                        27935,
+                        4441
+                    ]
+                },
+                "Salem": {
+                    "mapCutCoordinates": [
+                        4482,
+                        14979
+                    ]
+                },
+                "Dallas": {
+                    "mapCutCoordinates": [
+                        19094,
+                        8020
+                    ]
+                }
+            }
+        }
+    }
+}
